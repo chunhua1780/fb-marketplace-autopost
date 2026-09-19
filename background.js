@@ -1,12 +1,13 @@
-// background.js - 队列调度 + AI 回复代理(service worker)
+// background.js - 队列调度 + 导入现有商品 + AI 回复代理(service worker)
 // 说明:MV3 的 service worker 在空闲约 30 秒后会被 Chrome 回收,普通的
 // `await sleep(...)` 在等待发布间隔的几十/上百秒里大概率会被中断。
-// 所以两次发布之间的等待、以及自动续期检查,都用 chrome.alarms 实现——
-// 闹钟到点会重新唤醒 worker,而不是让 worker 自己挂着计时。
+// 所以两次发布之间的等待、导入下一件商品的等待、以及自动续期检查,都用
+// chrome.alarms 实现——闹钟到点会重新唤醒 worker,而不是让 worker 自己挂着计时。
 
 importScripts('storage.js');
 
 const ALARM_QUEUE_TICK = 'fb-marketplace-queue-tick';
+const ALARM_IMPORT_TICK = 'fb-marketplace-import-tick';
 const ALARM_REPOST_CHECK = 'fb-marketplace-repost-check';
 const pendingReadyResolvers = new Map();
 
@@ -28,6 +29,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_QUEUE_TICK) tick();
+  if (alarm.name === ALARM_IMPORT_TICK) importTick();
   if (alarm.name === ALARM_REPOST_CHECK) checkReposts();
 });
 
@@ -44,6 +46,13 @@ async function handleMessage(message, sender) {
       await chrome.alarms.clear(ALARM_QUEUE_TICK);
       chrome.action.setBadgeText({ text: '' });
       await appendLog({ level: 'info', text: '已停止队列(当前正在处理的商品不会中断)' });
+      return { ok: true };
+
+    case 'REPOST_NOW':
+      return repostNow(message.id);
+
+    case 'START_IMPORT':
+      startImport().catch((err) => appendLog({ level: 'error', text: '导入失败: ' + ((err && err.message) || err) }));
       return { ok: true };
 
     case 'CONTENT_READY': {
@@ -68,7 +77,7 @@ function waitForContentReady(tabId, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingReadyResolvers.delete(tabId);
-      reject(new Error('等待商品发布页面加载超时,可能是网络较慢或页面结构变化'));
+      reject(new Error('等待页面加载超时,可能是网络较慢或页面结构变化'));
     }, timeoutMs);
     pendingReadyResolvers.set(tabId, () => {
       clearTimeout(timer);
@@ -82,6 +91,8 @@ function randomInt(a, b) {
   const hi = Math.max(a, b);
   return Math.floor(Math.random() * (hi - lo + 1)) + lo;
 }
+
+// ---------- 发布队列 ----------
 
 async function tick() {
   const { queueRunning } = await chrome.storage.local.get('queueRunning');
@@ -109,25 +120,39 @@ async function tick() {
   chrome.alarms.create(ALARM_QUEUE_TICK, { delayInMinutes: waitSeconds / 60 });
 }
 
+async function repostNow(id) {
+  const listings = await getListings();
+  const idx = listings.findIndex((l) => l.id === id);
+  if (idx === -1) return { ok: false, error: '找不到该商品' };
+  listings[idx].status = 'pending';
+  listings[idx].lastError = null;
+  await saveListings(listings);
+  await appendLog({ level: 'info', text: `「${listings[idx].title}」已放入队列,准备重新上架` });
+  await chrome.storage.local.set({ queueRunning: true });
+  tick();
+  return { ok: true };
+}
+
 async function processListing(listing) {
   await setListingFields(listing.id, { status: 'running' });
+  const settings = await getSettings();
+  const oldItemId = listing.sourceItemId || null;
   let tab;
   try {
     tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/item', active: false });
     await waitForContentReady(tab.id);
 
-    const settings = await getSettings();
     const result = await chrome.tabs.sendMessage(tab.id, { type: 'FILL_LISTING', listing, settings });
     if (!result || !result.ok) {
       throw new Error((result && result.error) || '内容脚本没有返回结果');
     }
 
     const published = !!result.published;
-    const fields = {
-      status: published ? 'posted' : 'filled_awaiting_review',
-      lastError: null,
-      lastRunAt: Date.now(),
-    };
+    const fields = { status: published ? 'posted' : 'filled_awaiting_review', lastError: null, lastRunAt: Date.now() };
+    if (published && result.newItemId) {
+      fields.sourceItemId = result.newItemId;
+      fields.sourceUrl = result.newItemUrl || null;
+    }
     if (published && listing.repostEnabled) {
       const days = Number(listing.repostIntervalDays) > 0 ? Number(listing.repostIntervalDays) : 7;
       fields.nextRepostAt = Date.now() + days * 24 * 60 * 60 * 1000;
@@ -141,9 +166,39 @@ async function processListing(listing) {
     if (published) {
       setTimeout(() => chrome.tabs.remove(tab.id).catch(() => {}), 3000);
     }
+
+    // 只有「新的确认发布成功」+ 单条商品开了 deleteOldOnRepost + 全局总开关也开着,
+    // 才会去删除 Facebook 上的旧版本;顺序上永远是先确认新的发出去了才删旧的。
+    if (
+      published &&
+      listing.deleteOldOnRepost &&
+      settings.autoDeleteOldListings &&
+      oldItemId &&
+      oldItemId !== result.newItemId
+    ) {
+      await deleteOldListing(oldItemId, listing.title);
+    }
   } catch (err) {
     await setListingFields(listing.id, { status: 'failed', lastError: String((err && err.message) || err), lastRunAt: Date.now() });
     await appendLog({ level: 'error', text: `「${listing.title}」处理失败: ${(err && err.message) || err}` });
+  }
+}
+
+async function deleteOldListing(itemId, titleForLog) {
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${itemId}/`, active: false });
+    await waitForContentReady(tab.id, 20000);
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'DELETE_ITEM' });
+    if (!res || !res.ok) throw new Error((res && res.error) || '删除失败');
+    await appendLog({ level: 'success', text: `已自动删除「${titleForLog}」在 Facebook 上的旧版本` });
+  } catch (err) {
+    await appendLog({
+      level: 'error',
+      text: `自动删除「${titleForLog}」的旧版本失败,请自行去 Facebook 检查并手动删除: ${(err && err.message) || err}`,
+    });
+  } finally {
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
   }
 }
 
@@ -155,7 +210,8 @@ async function setListingFields(id, fields) {
   await saveListings(listings);
 }
 
-// 定期检查哪些「到期自动重新上架」的商品该重新排队了
+// ---------- 到期自动重新上架 ----------
+
 async function checkReposts() {
   const listings = await getListings();
   const now = Date.now();
@@ -178,6 +234,84 @@ async function checkReposts() {
     }
   }
 }
+
+// ---------- 导入 Facebook 上已有的商品 ----------
+
+async function startImport() {
+  const settings = await getSettings();
+  const url = settings.myListingsUrl || 'https://www.facebook.com/marketplace/you/selling';
+  await appendLog({ level: 'info', text: '正在打开商品管理页面扫描现有商品...' });
+
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url, active: false });
+    await waitForContentReady(tab.id, 25000);
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCAN_MY_LISTINGS' });
+    if (!res || !res.ok) throw new Error((res && res.error) || '扫描失败');
+
+    const listings = await getListings();
+    const known = new Set(listings.map((l) => l.sourceItemId).filter(Boolean));
+    const queue = res.items.filter((it) => !known.has(it.itemId));
+    await chrome.storage.local.set({ importQueue: queue });
+
+    if (!res.items.length) {
+      await appendLog({
+        level: 'error',
+        text: '没有扫描到任何商品,请确认「设置」里的商品管理页面网址是否正确(打开你自己的 Facebook 商品管理页,把地址栏网址复制过来)。',
+      });
+      return;
+    }
+    await appendLog({
+      level: 'info',
+      text: `扫描到 ${res.items.length} 件商品,其中 ${queue.length} 件是新的,开始逐个导入详情...`,
+    });
+  } finally {
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+
+  importTick();
+}
+
+async function importTick() {
+  const { importQueue = [] } = await chrome.storage.local.get('importQueue');
+  if (!importQueue.length) {
+    await appendLog({ level: 'info', text: '导入完成' });
+    return;
+  }
+  const [next, ...rest] = importQueue;
+  await chrome.storage.local.set({ importQueue: rest });
+
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${next.itemId}/edit`, active: false });
+    await waitForContentReady(tab.id, 20000);
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
+    if (!res || !res.ok) throw new Error((res && res.error) || '读取商品详情失败');
+
+    const listings = await getListings();
+    if (!listings.some((l) => l.sourceItemId === next.itemId)) {
+      listings.push(
+        genListing({
+          ...res.listing,
+          sourceItemId: next.itemId,
+          sourceUrl: next.sourceUrl,
+          status: 'imported',
+          importedAt: Date.now(),
+        })
+      );
+      await saveListings(listings);
+    }
+    await appendLog({ level: 'success', text: `已导入:「${res.listing.title || next.title}」` });
+  } catch (err) {
+    await appendLog({ level: 'error', text: `导入「${next.title}」失败: ${(err && err.message) || err}` });
+  } finally {
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+
+  chrome.alarms.create(ALARM_IMPORT_TICK, { delayInMinutes: (5 + Math.random() * 5) / 60 });
+}
+
+// ---------- AI 智能回复 ----------
 
 function buildAiSystemPrompt(listing, sellerInfo) {
   const lines = [

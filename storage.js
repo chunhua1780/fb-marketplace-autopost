@@ -7,6 +7,14 @@ const DEFAULT_SETTINGS = {
   // false = 只自动填表,停在发布前一步,由你本人手动点击「发布」确认(默认更安全)
   autoPublish: false,
 
+  // 「我的商品」管理页面网址,用于导入现有商品(不同账号/地区可能不一样,
+  // 如果扫描不到东西,先打开自己 Facebook 的商品管理页看看实际网址,改这里)
+  myListingsUrl: 'https://www.facebook.com/marketplace/you/selling',
+
+  // 重新上架时是否允许自动删除 Facebook 上的旧商品——这是全局总开关,
+  // 默认关闭;要真正生效还需要在每条商品自己的设置里也打开 deleteOldOnRepost
+  autoDeleteOldListings: false,
+
   // 商家信息(用于自动回复里告知买家地址/购买方式)
   sellerAddress: '',
   purchaseMethods: '',
@@ -49,6 +57,32 @@ const DEFAULT_FAQS = [
 
 function genId() {
   return 'l_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+// 统一的商品对象结构。手动新增(popup.js)和从 Facebook 导入(background.js)
+// 都通过这个函数生成,保证字段一致。
+function genListing(data) {
+  return {
+    id: genId(),
+    status: 'pending', // pending / running / filled_awaiting_review / posted / imported / failed
+    lastError: null,
+    lastRunAt: null,
+
+    // 到期自动重新上架
+    repostEnabled: false,
+    repostIntervalDays: 7,
+    nextRepostAt: null,
+
+    // 关联到 Facebook 上真实商品的 id(手动新增的没有,导入/发布成功后才会有)
+    sourceItemId: null,
+    sourceUrl: null,
+    importedAt: null,
+
+    // 重新上架成功后,是否自动去删除 Facebook 上的旧版本(默认关闭,很危险,见 README)
+    deleteOldOnRepost: false,
+
+    ...data,
+  };
 }
 
 async function getListings() {

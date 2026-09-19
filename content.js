@@ -1,80 +1,7 @@
-// content.js - 注入到 Facebook Marketplace 发布页面,实际找到表单元素并填写
-// 注意:Facebook 的页面结构经常调整,这里用「按可见文字/aria-label匹配」的
-// 方式尽量兼容改版,如果匹配不到某个字段,会在返回结果里报告具体是哪一步失败。
+// content.js - 注入到 Facebook Marketplace「发布商品」页面,自动找到表单并填写
+// 依赖 field-utils.js 提供的 DOM 辅助方法(manifest.json 里已经一起注入)
 
 (function () {
-  const LABELS = {
-    title: ['Title', '标题', '標題'],
-    price: ['Price', '价格', '價格'],
-    description: ['Description', '描述'],
-    category: ['Category', '类别', '分類', '類別'],
-    condition: ['Condition', '状况', '狀況', '成色'],
-    location: ['Location', '地点', '地點'],
-    next: ['Next', '下一步'],
-    publish: ['Publish', '发布', '發佈', '刊登'],
-  };
-
-  function normalize(text) {
-    return (text || '').trim().toLowerCase();
-  }
-
-  function textMatches(elText, candidates) {
-    const t = normalize(elText);
-    if (!t) return false;
-    return candidates.some((c) => t === normalize(c) || t.includes(normalize(c)));
-  }
-
-  function findFieldByLabel(candidates) {
-    const controls = Array.from(document.querySelectorAll('input, textarea'));
-    for (const el of controls) {
-      const aria = el.getAttribute('aria-label');
-      if (aria && textMatches(aria, candidates)) return el;
-    }
-    const labels = Array.from(document.querySelectorAll('label'));
-    for (const label of labels) {
-      if (textMatches(label.textContent, candidates)) {
-        if (label.htmlFor) {
-          const byId = document.getElementById(label.htmlFor);
-          if (byId) return byId;
-        }
-        const inner = label.querySelector('input, textarea');
-        if (inner) return inner;
-      }
-    }
-    return null;
-  }
-
-  function findClickableByText(candidates, root = document) {
-    const nodes = Array.from(root.querySelectorAll('div[role="button"], span[role="button"], button, a[role="button"]'));
-    for (const el of nodes) {
-      const label = el.getAttribute('aria-label') || el.textContent;
-      if (textMatches(label, candidates)) return el;
-    }
-    return null;
-  }
-
-  function setNativeValue(el, value) {
-    const proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-    const setter = Object.getOwnPropertyDescriptor(proto, 'value').set;
-    setter.call(el, value);
-    el.dispatchEvent(new Event('input', { bubbles: true }));
-    el.dispatchEvent(new Event('change', { bubbles: true }));
-  }
-
-  function sleep(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
-  }
-
-  async function waitFor(fn, { timeout = 15000, interval = 300 } = {}) {
-    const start = Date.now();
-    while (Date.now() - start < timeout) {
-      const result = fn();
-      if (result) return result;
-      await sleep(interval);
-    }
-    return null;
-  }
-
   async function attachPhotos(photos) {
     if (!photos || !photos.length) return;
     const input = await waitFor(() => document.querySelector('input[type="file"]'));
@@ -90,7 +17,7 @@
     files.forEach((f) => dt.items.add(f));
     input.files = dt.files;
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    await sleep(1500);
+    await fbSleep(1500);
   }
 
   async function selectFromDropdown(triggerCandidates, optionText) {
@@ -98,31 +25,40 @@
     const trigger = await waitFor(() => findFieldByLabel(triggerCandidates) || findClickableByText(triggerCandidates));
     if (!trigger) throw new Error(`找不到「${optionText}」对应的选择控件`);
     trigger.click();
-    await sleep(400);
+    await fbSleep(400);
 
     const activeInput = document.activeElement;
     if (activeInput && activeInput.tagName === 'INPUT') {
       setNativeValue(activeInput, optionText);
-      await sleep(500);
+      await fbSleep(500);
     }
 
     const option = await waitFor(() => {
       const options = Array.from(document.querySelectorAll('[role="option"], li'));
-      return options.find((o) => normalize(o.textContent).includes(normalize(optionText))) || null;
+      return options.find((o) => fbNormalize(o.textContent).includes(fbNormalize(optionText))) || null;
     }, { timeout: 5000 });
 
     if (!option) {
       throw new Error(`在下拉列表里没找到「${optionText}」这个选项,请确认文字与 Facebook 页面上显示的完全一致`);
     }
     option.click();
-    await sleep(300);
+    await fbSleep(300);
+  }
+
+  // 发布成功后 Facebook 通常会跳到新商品自己的页面,尝试从网址里读出新商品的 id,
+  // 这样背景脚本以后就能精确地找到「这一次发布出来的新商品」(比如用来在下次
+  // 重新上架时删除它,而不是删错别的商品)。读不到就返回 null,不影响其他功能。
+  function captureNewItemId() {
+    const m = location.href.match(/\/marketplace\/item\/(\d+)/);
+    if (!m) return { newItemId: null, newItemUrl: null };
+    return { newItemId: m[1], newItemUrl: `https://www.facebook.com/marketplace/item/${m[1]}/` };
   }
 
   async function fillListing(listing) {
     const steps = [];
     try {
       steps.push('等待表单加载');
-      const titleReady = await waitFor(() => findFieldByLabel(LABELS.title), { timeout: 20000 });
+      const titleReady = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 20000 });
       if (!titleReady) throw new Error('页面加载超时,没有找到标题输入框(可能未登录,或 Facebook 改版)');
 
       if (listing.photos && listing.photos.length) {
@@ -131,33 +67,33 @@
       }
 
       steps.push('填写标题');
-      const titleEl = findFieldByLabel(LABELS.title);
+      const titleEl = findFieldByLabel(FB_LABELS.title);
       if (titleEl) setNativeValue(titleEl, listing.title || '');
 
       steps.push('填写价格');
-      const priceEl = findFieldByLabel(LABELS.price);
+      const priceEl = findFieldByLabel(FB_LABELS.price);
       if (priceEl) setNativeValue(priceEl, String(listing.price ?? ''));
 
       if (listing.category) {
         steps.push('选择类别');
-        await selectFromDropdown(LABELS.category, listing.category);
+        await selectFromDropdown(FB_LABELS.category, listing.category);
       }
 
       if (listing.condition) {
         steps.push('选择成色');
-        await selectFromDropdown(LABELS.condition, listing.condition);
+        await selectFromDropdown(FB_LABELS.condition, listing.condition);
       }
 
       steps.push('填写描述');
-      const descEl = findFieldByLabel(LABELS.description);
+      const descEl = findFieldByLabel(FB_LABELS.description);
       if (descEl) setNativeValue(descEl, listing.description || '');
 
       if (listing.location) {
         steps.push('填写地点');
-        const locEl = findFieldByLabel(LABELS.location);
+        const locEl = findFieldByLabel(FB_LABELS.location);
         if (locEl) {
           setNativeValue(locEl, listing.location);
-          await sleep(800);
+          await fbSleep(800);
           const suggestion = await waitFor(
             () => document.querySelector('[role="listbox"] [role="option"], ul[role="listbox"] li'),
             { timeout: 3000 }
@@ -170,19 +106,19 @@
         steps.push('自动翻页并发布');
         let publishBtn = null;
         for (let i = 0; i < 5; i++) {
-          publishBtn = findClickableByText(LABELS.publish);
+          publishBtn = findClickableByText(FB_LABELS.publish);
           if (publishBtn) break;
-          const nextBtn = findClickableByText(LABELS.next);
+          const nextBtn = findClickableByText(FB_LABELS.next);
           if (!nextBtn) break;
           nextBtn.click();
-          await sleep(1200);
+          await fbSleep(1200);
         }
         if (!publishBtn) {
           throw new Error('已自动填好表单,但没找到「发布」按钮,请手动检查并点击发布');
         }
         publishBtn.click();
-        await sleep(1500);
-        return { ok: true, published: true, steps };
+        await fbSleep(2000);
+        return { ok: true, published: true, steps, ...captureNewItemId() };
       }
 
       return { ok: true, published: false, steps };

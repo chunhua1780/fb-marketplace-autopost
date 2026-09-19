@@ -10,8 +10,22 @@
     <h1>FB Marketplace 智能卖家助手</h1>
   </header>
 
+  <section id="import-section">
+    <h2>导入我已有的商品</h2>
+    <p class="hint">
+      打开你自己 Facebook 的「商品管理/正在出售」页面,把地址栏网址复制到下面(第一次用先确认一下,不同账号/地区可能不一样)。
+    </p>
+    <label>商品管理页面网址
+      <input type="text" id="s-my-listings-url" placeholder="https://www.facebook.com/marketplace/you/selling" />
+    </label>
+    <div class="row">
+      <button id="save-import-url-btn" class="secondary">保存网址</button>
+      <button id="start-import-btn">开始扫描并导入</button>
+    </div>
+  </section>
+
   <section id="form-section">
-    <h2 id="form-title">新增商品</h2>
+    <h2 id="form-title">手动新增商品</h2>
     <input type="hidden" id="editing-id" />
     <label>标题
       <input type="text" id="f-title" placeholder="例如:实木餐桌 四人座" />
@@ -42,6 +56,10 @@
     <label id="f-repost-days-wrap" hidden>间隔天数
       <input type="number" id="f-repost-days" min="1" value="7" />
     </label>
+    <label class="checkbox" id="f-delete-old-wrap" hidden>
+      <input type="checkbox" id="f-delete-old" />
+      重新上架成功后,自动删除 Facebook 上的旧版本(⚠️ 不可撤销,还需要在下面「发布设置」里打开总开关才会生效)
+    </label>
     <div class="row">
       <button id="save-btn">保存商品</button>
       <button id="cancel-edit-btn" class="secondary" hidden>取消编辑</button>
@@ -64,6 +82,10 @@
     <label class="checkbox">
       <input type="checkbox" id="s-autopublish" />
       自动点击「发布」(不勾选则只自动填表,由你手动确认发布,更安全)
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="s-auto-delete-old" />
+      允许「重新上架」自动删除 Facebook 上的旧商品总开关(⚠️ 不可撤销,默认关闭)
     </label>
     <button id="save-settings-btn">保存发布设置</button>
   </section>
@@ -136,6 +158,7 @@
     <div id="log"></div>
   </section>
 
+  <script src="storage.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

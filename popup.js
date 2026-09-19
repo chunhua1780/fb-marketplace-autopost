@@ -1,4 +1,11 @@
+// popup.js - 依赖 storage.js 提供的 genId / genListing / getListings / saveListings /
+// getSettings / getFaqs / saveFaqs 等公共方法(popup.html 里已经先加载了 storage.js)
+
 const els = {
+  myListingsUrl: document.getElementById('s-my-listings-url'),
+  saveImportUrlBtn: document.getElementById('save-import-url-btn'),
+  startImportBtn: document.getElementById('start-import-btn'),
+
   title: document.getElementById('f-title'),
   price: document.getElementById('f-price'),
   category: document.getElementById('f-category'),
@@ -10,6 +17,8 @@ const els = {
   repostEnabled: document.getElementById('f-repost-enabled'),
   repostDaysWrap: document.getElementById('f-repost-days-wrap'),
   repostDays: document.getElementById('f-repost-days'),
+  deleteOldWrap: document.getElementById('f-delete-old-wrap'),
+  deleteOld: document.getElementById('f-delete-old'),
   editingId: document.getElementById('editing-id'),
   formTitle: document.getElementById('form-title'),
   saveBtn: document.getElementById('save-btn'),
@@ -19,6 +28,7 @@ const els = {
   sMin: document.getElementById('s-min'),
   sMax: document.getElementById('s-max'),
   sAutoPublish: document.getElementById('s-autopublish'),
+  sAutoDeleteOld: document.getElementById('s-auto-delete-old'),
   saveSettingsBtn: document.getElementById('save-settings-btn'),
 
   sAddress: document.getElementById('s-address'),
@@ -51,6 +61,7 @@ const STATUS_LABEL = {
   running: '发布中...',
   filled_awaiting_review: '已填表,待你确认发布',
   posted: '已发布',
+  imported: '已从 Facebook 导入(未在队列中)',
   failed: '失败',
 };
 
@@ -69,19 +80,6 @@ function escapeHtml(s) {
   }[c]));
 }
 
-function genId() {
-  return 'l_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
-}
-
-async function getListings() {
-  const { listings = [] } = await chrome.storage.local.get('listings');
-  return listings;
-}
-
-async function saveListings(listings) {
-  await chrome.storage.local.set({ listings });
-}
-
 function renderPhotoPreview() {
   els.photoPreview.innerHTML = '';
   currentPhotos.forEach((p) => {
@@ -98,7 +96,7 @@ els.repostEnabled.addEventListener('change', () => {
 
 function resetForm() {
   els.editingId.value = '';
-  els.formTitle.textContent = '新增商品';
+  els.formTitle.textContent = '手动新增商品';
   els.title.value = '';
   els.price.value = '';
   els.category.value = '';
@@ -109,6 +107,8 @@ function resetForm() {
   els.repostEnabled.checked = false;
   els.repostDays.value = 7;
   els.repostDaysWrap.hidden = true;
+  els.deleteOld.checked = false;
+  els.deleteOldWrap.hidden = true;
   currentPhotos = [];
   renderPhotoPreview();
   els.cancelEditBtn.hidden = true;
@@ -138,19 +138,13 @@ els.saveBtn.addEventListener('click', async () => {
     photos: currentPhotos,
     repostEnabled: els.repostEnabled.checked,
     repostIntervalDays: Number(els.repostDays.value) || 7,
+    deleteOldOnRepost: els.deleteOld.checked,
   };
   if (editingId) {
     const idx = listings.findIndex((l) => l.id === editingId);
     if (idx !== -1) listings[idx] = { ...listings[idx], ...data };
   } else {
-    listings.push({
-      id: genId(),
-      status: 'pending',
-      lastError: null,
-      lastRunAt: null,
-      nextRepostAt: null,
-      ...data,
-    });
+    listings.push(genListing(data));
   }
   await saveListings(listings);
   resetForm();
@@ -174,13 +168,16 @@ async function editListing(id) {
   els.repostEnabled.checked = !!l.repostEnabled;
   els.repostDays.value = l.repostIntervalDays || 7;
   els.repostDaysWrap.hidden = !l.repostEnabled;
+  // 只有关联着真实 Facebook 商品(导入过,或已经自动发布过一次)才需要「删除旧版本」这个选项
+  els.deleteOldWrap.hidden = !l.sourceItemId;
+  els.deleteOld.checked = !!l.deleteOldOnRepost;
   currentPhotos = l.photos || [];
   renderPhotoPreview();
   els.cancelEditBtn.hidden = false;
 }
 
 async function deleteListing(id) {
-  if (!confirm('确定删除这个商品吗?')) return;
+  if (!confirm('确定从插件里删除这个商品吗?(不会影响它在 Facebook 上是否存在)')) return;
   const listings = await getListings();
   await saveListings(listings.filter((l) => l.id !== id));
   await renderList();
@@ -197,11 +194,16 @@ async function resetStatus(id) {
   await renderList();
 }
 
+async function repostNow(id) {
+  const res = await chrome.runtime.sendMessage({ type: 'REPOST_NOW', id });
+  if (!res || !res.ok) alert('无法开始重新上架: ' + (res && res.error));
+}
+
 async function renderList() {
   const listings = await getListings();
   els.list.innerHTML = '';
   if (!listings.length) {
-    els.list.innerHTML = '<li class="empty">还没有商品,先在上面添加一个吧</li>';
+    els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「导入我已有的商品」,或者手动新增一个</li>';
     return;
   }
   listings.forEach((l) => {
@@ -213,14 +215,18 @@ async function renderList() {
         <span class="price">${escapeHtml(l.price || '')}</span>
         <span class="status">${STATUS_LABEL[l.status] || l.status}</span>
       </div>
+      ${l.sourceItemId ? '<div class="badge">📥 已关联 Facebook 上的商品</div>' : ''}
       ${l.repostEnabled ? `<div class="badge">🔁 每 ${l.repostIntervalDays || 7} 天自动重新上架</div>` : ''}
+      ${l.deleteOldOnRepost ? '<div class="badge">⚠️ 重新上架会自动删旧版本</div>' : ''}
       ${l.lastError ? `<div class="error">${escapeHtml(l.lastError)}</div>` : ''}
       <div class="actions">
+        <button data-action="repost">立即重新上架</button>
         <button data-action="edit">编辑</button>
         <button data-action="retry">重设为待发布</button>
         <button data-action="delete" class="danger">删除</button>
       </div>
     `;
+    li.querySelector('[data-action="repost"]').addEventListener('click', () => repostNow(l.id));
     li.querySelector('[data-action="edit"]').addEventListener('click', () => editListing(l.id));
     li.querySelector('[data-action="retry"]').addEventListener('click', () => resetStatus(l.id));
     li.querySelector('[data-action="delete"]').addEventListener('click', () => deleteListing(l.id));
@@ -229,70 +235,69 @@ async function renderList() {
 }
 
 async function loadSettings() {
-  const { settings = {} } = await chrome.storage.local.get('settings');
-  els.sMin.value = settings.minDelaySeconds ?? 60;
-  els.sMax.value = settings.maxDelaySeconds ?? 150;
-  els.sAutoPublish.checked = !!settings.autoPublish;
+  const settings = await getSettings();
+  els.myListingsUrl.value = settings.myListingsUrl;
 
-  els.sAddress.value = settings.sellerAddress || '';
-  els.sPurchase.value = settings.purchaseMethods || '';
+  els.sMin.value = settings.minDelaySeconds;
+  els.sMax.value = settings.maxDelaySeconds;
+  els.sAutoPublish.checked = !!settings.autoPublish;
+  els.sAutoDeleteOld.checked = !!settings.autoDeleteOldListings;
+
+  els.sAddress.value = settings.sellerAddress;
+  els.sPurchase.value = settings.purchaseMethods;
 
   els.arEnabled.checked = !!settings.autoReplyEnabled;
   els.arDryrun.checked = settings.autoReplyDryRun !== false;
-  els.arMaxPerDay.value = settings.maxAutoRepliesPerDay ?? 40;
-  els.arCooldown.value = settings.perThreadCooldownSeconds ?? 20;
+  els.arMaxPerDay.value = settings.maxAutoRepliesPerDay;
+  els.arCooldown.value = settings.perThreadCooldownSeconds;
   els.arAiEnabled.checked = !!settings.aiModeEnabled;
-  els.arAiKey.value = settings.aiApiKey || '';
-  els.arAiModel.value = settings.aiModel || 'claude-haiku-4-5';
+  els.arAiKey.value = settings.aiApiKey;
+  els.arAiModel.value = settings.aiModel;
 }
 
+els.saveImportUrlBtn.addEventListener('click', async () => {
+  const settings = await getSettings();
+  await saveSettings({ ...settings, myListingsUrl: els.myListingsUrl.value.trim() });
+});
+
+els.startImportBtn.addEventListener('click', async () => {
+  const res = await chrome.runtime.sendMessage({ type: 'START_IMPORT' });
+  if (!res || !res.ok) alert('无法开始导入: ' + (res && res.error));
+});
+
 els.saveSettingsBtn.addEventListener('click', async () => {
-  const { settings = {} } = await chrome.storage.local.get('settings');
-  await chrome.storage.local.set({
-    settings: {
-      ...settings,
-      minDelaySeconds: Number(els.sMin.value) || 60,
-      maxDelaySeconds: Number(els.sMax.value) || 150,
-      autoPublish: els.sAutoPublish.checked,
-    },
+  const settings = await getSettings();
+  await saveSettings({
+    ...settings,
+    minDelaySeconds: Number(els.sMin.value) || 60,
+    maxDelaySeconds: Number(els.sMax.value) || 150,
+    autoPublish: els.sAutoPublish.checked,
+    autoDeleteOldListings: els.sAutoDeleteOld.checked,
   });
 });
 
 els.saveSellerBtn.addEventListener('click', async () => {
-  const { settings = {} } = await chrome.storage.local.get('settings');
-  await chrome.storage.local.set({
-    settings: {
-      ...settings,
-      sellerAddress: els.sAddress.value.trim(),
-      purchaseMethods: els.sPurchase.value.trim(),
-    },
+  const settings = await getSettings();
+  await saveSettings({
+    ...settings,
+    sellerAddress: els.sAddress.value.trim(),
+    purchaseMethods: els.sPurchase.value.trim(),
   });
 });
 
 els.saveAutoReplyBtn.addEventListener('click', async () => {
-  const { settings = {} } = await chrome.storage.local.get('settings');
-  await chrome.storage.local.set({
-    settings: {
-      ...settings,
-      autoReplyEnabled: els.arEnabled.checked,
-      autoReplyDryRun: els.arDryrun.checked,
-      maxAutoRepliesPerDay: Number(els.arMaxPerDay.value) || 40,
-      perThreadCooldownSeconds: Number(els.arCooldown.value) || 20,
-      aiModeEnabled: els.arAiEnabled.checked,
-      aiApiKey: els.arAiKey.value.trim(),
-      aiModel: els.arAiModel.value.trim() || 'claude-haiku-4-5',
-    },
+  const settings = await getSettings();
+  await saveSettings({
+    ...settings,
+    autoReplyEnabled: els.arEnabled.checked,
+    autoReplyDryRun: els.arDryrun.checked,
+    maxAutoRepliesPerDay: Number(els.arMaxPerDay.value) || 40,
+    perThreadCooldownSeconds: Number(els.arCooldown.value) || 20,
+    aiModeEnabled: els.arAiEnabled.checked,
+    aiApiKey: els.arAiKey.value.trim(),
+    aiModel: els.arAiModel.value.trim() || 'claude-haiku-4-5',
   });
 });
-
-async function getFaqs() {
-  const { faqs = [] } = await chrome.storage.local.get('faqs');
-  return faqs;
-}
-
-async function saveFaqs(faqs) {
-  await chrome.storage.local.set({ faqs });
-}
 
 async function renderFaqs() {
   const faqs = await getFaqs();
