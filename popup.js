@@ -4,6 +4,7 @@
 const els = {
   importStatus: document.getElementById('import-status'),
   scanCurrentBtn: document.getElementById('scan-current-btn'),
+  copyDiagnosticsBtn: document.getElementById('copy-diagnostics-btn'),
   scanResults: document.getElementById('scan-results'),
   scanList: document.getElementById('scan-list'),
   selectAllBtn: document.getElementById('select-all-btn'),
@@ -62,6 +63,7 @@ const els = {
 let currentPhotos = []; // { name, dataUrl }[]
 let scannedItems = []; // 最近一次「扫描当前页面」的结果
 let scanTabId = null; // 被扫描的那个标签页 id
+let lastDiagnostics = null; // 最近一次扫描的页面诊断信息,出问题时可以复制给开发者
 
 const STATUS_LABEL = {
   pending: '待发布',
@@ -283,8 +285,11 @@ els.scanCurrentBtn.addEventListener('click', async () => {
     const res = await chrome.tabs.sendMessage(scanTabId, { type: 'SCAN_MY_LISTINGS' });
     if (!res || !res.ok) throw new Error((res && res.error) || '扫描失败');
     scannedItems = res.items;
+    lastDiagnostics = res.diagnostics || null;
+    els.copyDiagnosticsBtn.disabled = !lastDiagnostics;
     if (!scannedItems.length) {
-      els.importStatus.textContent = '没有在当前页面扫描到商品。请确认这个页面里能直接看到你的商品卡片(可能需要先手动滚动看看有没有加载出来,或者这不是「我的商品」页面)。';
+      els.importStatus.textContent =
+        '没有在当前页面扫描到商品。请确认这页面里能直接看到你的商品卡片(可能需要先手动滚动看看有没有加载出来,或者这不是「我的商品」页面)。点「复制诊断信息」把结果发给开发者可以帮忙定位。';
       els.scanResults.hidden = true;
       return;
     }
@@ -294,6 +299,16 @@ els.scanCurrentBtn.addEventListener('click', async () => {
   } catch (err) {
     els.importStatus.textContent =
       '扫描失败:' + ((err && err.message) || err) + '。如果插件是刚安装/刚更新的,请先刷新一下那个 Facebook 标签页,再重新点扫描(插件脚本需要页面重新加载一次才会生效)。';
+  }
+});
+
+els.copyDiagnosticsBtn.addEventListener('click', async () => {
+  if (!lastDiagnostics) return;
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(lastDiagnostics, null, 2));
+    els.importStatus.textContent = '诊断信息已复制到剪贴板,粘贴发给开发者就行。';
+  } catch (err) {
+    alert('复制失败,你也可以直接看这里:\n' + JSON.stringify(lastDiagnostics, null, 2));
   }
 });
 
