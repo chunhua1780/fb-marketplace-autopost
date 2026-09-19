@@ -58,58 +58,117 @@
     return null;
   }
 
-  // 从商品链接往上找「卡片」边界:role="article" 最理想直接用;找不到就一层层
+  // 卖家自己的「正在出售」页面实测是一行一个商品的列表(缩略图+标题+价格+状态
+  // 文字+「Mark as sold / Share / ...」这一排按钮),不是图文卡片网格。价格前面
+  // 常常是货币代码而不是货币符号(比如 AED250、USD1,200),不能只认 $ ￥ 这种符号。
+  const PRICE_RE = /(?:[$€£¥₹]\s?\d[\d,.]*|[A-Z]{2,4}\s?\d[\d,.]*)/;
+
+  // 从商品链接往上找「行/卡片」边界:role="article" 最理想直接用;找不到就一层层
   // 往上走,只要祖先节点里还只包含这一个商品链接就继续扩大范围,一旦某层祖先
-  // 里出现了第二个商品链接,说明已经跨出了这张卡片、跑到装着好几张卡片的外层
+  // 里出现了第二个商品链接,说明已经跨出了这一行、跑到装着好几个商品的外层
   // 容器里了,就停在上一层。
-  function extractCard(anchor) {
+  function findRowBoundary(anchor) {
     const article = anchor.closest('[role="article"]');
-    let card = article || anchor;
-    if (!article) {
-      let node = anchor;
-      let hops = 0;
-      while (node && hops < 6) {
-        const linksInside = node.querySelectorAll('a[href*="/marketplace/item/"]').length;
-        if (linksInside > 1) break;
-        card = node;
-        node = node.parentElement;
-        hops += 1;
-      }
+    if (article) return article;
+    let card = anchor;
+    let node = anchor;
+    let hops = 0;
+    while (node && hops < 8) {
+      const linksInside = node.querySelectorAll('a[href*="/marketplace/item/"]').length;
+      if (linksInside > 1) break;
+      card = node;
+      node = node.parentElement;
+      hops += 1;
     }
-    const text = (card.innerText || card.textContent || '').trim();
-    const img = card.querySelector('img');
+    return card;
+  }
+
+  function extractFromRow(row) {
+    const text = (row.innerText || row.textContent || '').trim();
+    const img = row.querySelector('img');
     const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+    const priceMatch = text.match(PRICE_RE);
     return {
       title: lines[0] || '',
-      priceText: (text.match(/[$￥][0-9,.]+/) || [''])[0],
+      priceText: priceMatch ? priceMatch[0] : lines[1] || '',
       thumbUrl: img ? img.src : '',
     };
   }
 
-  function scan() {
-    const scope = findSellingSection() || document;
+  // 策略一:直接按「商品链接」找(最理想,能直接拿到 itemId)
+  function scanByItemLinks(scope) {
     const anchors = Array.from(scope.querySelectorAll('a[href*="/marketplace/item/"]'));
-    const seen = new Set();
-    const items = [];
+    const found = new Map();
     for (const a of anchors) {
       const m = (a.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
       if (!m) continue;
       const itemId = m[1];
-      if (seen.has(itemId)) continue;
-      seen.add(itemId);
-
-      const { title, priceText, thumbUrl } = extractCard(a);
-      if (!title && !priceText && !thumbUrl) continue; // 明显不是一张商品卡片,跳过
-
-      items.push({
-        itemId,
-        title,
-        priceText,
-        thumbUrl,
-        sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/`,
-      });
+      if (found.has(itemId)) continue;
+      const row = findRowBoundary(a);
+      const info = extractFromRow(row);
+      if (!info.title && !info.priceText && !info.thumbUrl) continue;
+      found.set(itemId, { itemId, ...info });
     }
-    return items;
+    return found;
+  }
+
+  // 策略二(兜底):Facebook 有的版本商品标题可能不是直接可见 href 的 <a>,
+  // 改成按每一行都会有的「Mark as sold / 标记为已售出」这类操作按钮定位到行,
+  // 再从这一行里找有没有能提取出 itemId 的链接。找不到 itemId 的行就跳过
+  // (没有 id 没法定位到具体商品,不能导入)。
+  function scanByActionButtons(scope) {
+    const buttonCandidates = ['Mark as sold', 'Mark As Sold', '标记为已售出', '标为已售出', '標記為已售出'];
+    const buttons = Array.from(
+      scope.querySelectorAll('div[role="button"], span[role="button"], button, a[role="button"]')
+    ).filter((el) => fbTextMatches(el.getAttribute('aria-label') || el.textContent, buttonCandidates));
+
+    const found = new Map();
+    for (const btn of buttons) {
+      let node = btn.parentElement;
+      let row = null;
+      let hops = 0;
+      while (node && hops < 10) {
+        if (node.querySelector('img')) {
+          row = node;
+        }
+        if (node.querySelectorAll('div[role="button"], button').length > 6) break; // 明显已经跨出这一行
+        node = node.parentElement;
+        hops += 1;
+      }
+      if (!row) continue;
+
+      const link = row.querySelector('a[href*="/marketplace/item/"]');
+      const m = link && (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
+      if (!m) continue;
+      const itemId = m[1];
+      if (found.has(itemId)) continue;
+
+      const info = extractFromRow(row);
+      found.set(itemId, { itemId, ...info });
+    }
+    return found;
+  }
+
+  function scan() {
+    const section = findSellingSection();
+    const scope = section || document;
+    const byLinks = scanByItemLinks(scope);
+    const byButtons = scanByActionButtons(scope);
+    const merged = new Map([...byButtons, ...byLinks]); // 链接法拿到的信息通常更全,后合并的覆盖前面的
+
+    const items = Array.from(merged.values()).map((it) => ({
+      ...it,
+      sourceUrl: `https://www.facebook.com/marketplace/item/${it.itemId}/`,
+    }));
+
+    const diagnostics = {
+      ...collectDiagnostics(),
+      foundBySection: !!section,
+      foundByItemLinks: byLinks.size,
+      foundByActionButtons: byButtons.size,
+    };
+
+    return { items, diagnostics };
   }
 
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
@@ -121,8 +180,8 @@
     }
     if (message.type === 'SCAN_MY_LISTINGS') {
       autoScrollToLoadAll().then(() => {
-        const items = scan();
-        sendResponse({ ok: true, items, diagnostics: collectDiagnostics() });
+        const { items, diagnostics } = scan();
+        sendResponse({ ok: true, items, diagnostics });
       });
       return true;
     }

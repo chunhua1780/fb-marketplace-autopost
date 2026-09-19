@@ -297,11 +297,13 @@ els.scanCurrentBtn.addEventListener('click', async () => {
     els.copyDiagnosticsBtn.disabled = !lastDiagnostics;
     if (!scannedItems.length) {
       const d = lastDiagnostics;
-      const counts = d ? `本页面共有 ${d.totalLinks} 个链接,其中 ${d.marketplaceItemLinks} 个是商品链接。` : '';
+      const counts = d
+        ? `诊断:页面共 ${d.totalLinks} 个链接(${d.marketplaceItemLinks} 个是商品链接)、按链接识别到 ${d.foundByItemLinks} 件、按"Mark as sold"按钮识别到 ${d.foundByActionButtons} 件、有没有定位到"正在出售"区块:${d.foundBySection ? '有' : '没有'}。`
+        : '';
       const hint =
         d && d.marketplaceItemLinks === 0
-          ? '这个页面本身就没有商品卡片的链接——请确认你现在停在的是「我的商品/正在出售」这个具体页面(不是搜索结果页、不是首页),而不是别的 Marketplace 页面。'
-          : '页面上有商品链接,但没能从里面提取出标题/价格——大概率是这个账号的页面卡片结构和预期不一样。';
+          ? '这个页面本身就没有商品卡片的链接——请确认你现在停在的是「我的商品/正在出售」这个具体页面(不是搜索结果页、不是首页)。'
+          : '页面上有商品链接,但没能从里面提取出标题/价格——大概率是这个账号的页面结构和预期不一样。';
       els.importStatus.textContent = `没有扫描到商品。${counts}${hint} 点下面「复制诊断信息」把结果发给开发者可以帮忙精确定位。`;
       els.scanResults.hidden = true;
       return;
