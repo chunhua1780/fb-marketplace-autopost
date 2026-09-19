@@ -2,12 +2,12 @@
 <html lang="zh">
 <head>
 <meta charset="UTF-8" />
-<title>FB Marketplace 自动发布助手</title>
+<title>FB Marketplace 智能卖家助手</title>
 <link rel="stylesheet" href="popup.css" />
 </head>
 <body>
   <header>
-    <h1>FB Marketplace 自动发布助手</h1>
+    <h1>FB Marketplace 智能卖家助手</h1>
   </header>
 
   <section id="form-section">
@@ -35,6 +35,13 @@
       <input type="file" id="f-photos" accept="image/*" multiple />
     </label>
     <div id="photo-preview"></div>
+    <label class="checkbox">
+      <input type="checkbox" id="f-repost-enabled" />
+      到期后自动重新上架(保持商品排名靠前)
+    </label>
+    <label id="f-repost-days-wrap" hidden>间隔天数
+      <input type="number" id="f-repost-days" min="1" value="7" />
+    </label>
     <div class="row">
       <button id="save-btn">保存商品</button>
       <button id="cancel-edit-btn" class="secondary" hidden>取消编辑</button>
@@ -58,10 +65,70 @@
       <input type="checkbox" id="s-autopublish" />
       自动点击「发布」(不勾选则只自动填表,由你手动确认发布,更安全)
     </label>
-    <button id="save-settings-btn">保存设置</button>
+    <button id="save-settings-btn">保存发布设置</button>
+  </section>
+
+  <section id="seller-section">
+    <h2>商家信息(自动回复时会用到)</h2>
+    <label>取货 / 交易地址
+      <textarea id="s-address" rows="2" placeholder="例如:San Francisco, CA 一带,约好时间见面"></textarea>
+    </label>
+    <label>购买 / 付款方式
+      <textarea id="s-purchase" rows="2" placeholder="例如:现金 / Zelle / Venmo,面交"></textarea>
+    </label>
+    <button id="save-seller-btn">保存商家信息</button>
+  </section>
+
+  <section id="autoreply-section">
+    <h2>自动回复(询盘机器人)</h2>
+    <p class="hint">
+      默认「试运行」模式:只在下方日志里显示会怎么回复,不会真的发送消息。
+      建议先观察一段时间,确认识别没问题后再关闭试运行。
+    </p>
+    <label class="checkbox">
+      <input type="checkbox" id="ar-enabled" />
+      开启自动回复
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="ar-dryrun" />
+      试运行(只记录日志,不真的发送)
+    </label>
+    <label>每天最多自动回复次数
+      <input type="number" id="ar-max-per-day" min="1" />
+    </label>
+    <label>同一对话两次自动回复的最短间隔(秒)
+      <input type="number" id="ar-cooldown" min="5" />
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="ar-ai-enabled" />
+      规则库没命中时,用 AI 智能生成回复(需要你自己的 Anthropic API Key)
+    </label>
+    <label>Anthropic API Key
+      <input type="password" id="ar-ai-key" placeholder="sk-ant-..." autocomplete="off" />
+    </label>
+    <label>AI 模型
+      <input type="text" id="ar-ai-model" placeholder="claude-haiku-4-5" />
+    </label>
+    <button id="save-autoreply-btn">保存自动回复设置</button>
+  </section>
+
+  <section id="faq-section">
+    <h2>常见问题话术(按关键词匹配)</h2>
+    <p class="hint">
+      可用变量:{{title}} {{price}} {{condition}} {{description}} {{address}} {{purchase}}
+    </p>
+    <ul id="faq-list"></ul>
+    <div class="row">
+      <input type="text" id="faq-keywords" placeholder="关键词,用逗号分隔" />
+    </div>
+    <div class="row">
+      <input type="text" id="faq-answer" placeholder="回答话术,可用上面的变量" />
+    </div>
+    <button id="faq-add-btn">添加话术</button>
   </section>
 
   <section id="run-section">
+    <h2>发布队列</h2>
     <div class="row">
       <button id="start-btn">开始发布队列</button>
       <button id="stop-btn" class="secondary">停止</button>

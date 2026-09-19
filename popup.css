@@ -156,10 +156,57 @@ button.danger {
   color: #1a4fb4;
 }
 
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  color: #444;
+  background: #f0f2f5;
+  border-radius: 10px;
+  padding: 1px 8px;
+  margin-top: 4px;
+}
+
 .error {
   color: #c0362c;
   font-size: 11px;
   margin-top: 2px;
+}
+
+.hint {
+  font-size: 11px;
+  color: #777;
+  margin: 0 0 8px;
+  line-height: 1.5;
+}
+
+#faq-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.faq-item {
+  border-bottom: 1px solid #eee;
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+.faq-keywords {
+  color: #1877f2;
+  font-weight: 600;
+}
+
+.faq-answer {
+  color: #444;
+  margin: 2px 0 4px;
+}
+
+.faq-item button {
+  flex: none;
+  padding: 3px 8px;
+  font-size: 11px;
 }
 
 .actions {
