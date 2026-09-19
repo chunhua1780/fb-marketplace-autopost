@@ -1,6 +1,17 @@
 // popup.js - 依赖 storage.js 提供的 genId / genListing / getListings / saveListings /
 // getSettings / getFaqs / saveFaqs 等公共方法(popup.html 里已经先加载了 storage.js)
 
+// 任何没被 try/catch 接住的报错(包括异步的),都直接显示在面板最上面,方便
+// 用户截图反馈——不然出错时面板可能看起来"整个打不开",但其实只是某一小块坏了。
+function showFatalError(text) {
+  const div = document.createElement('div');
+  div.style.cssText = 'background:#fde2e1;color:#c0362c;padding:8px;margin-bottom:8px;border-radius:6px;font-size:12px;font-weight:bold;white-space:pre-wrap;';
+  div.textContent = '[插件出错] ' + text;
+  document.body.insertBefore(div, document.body.firstChild);
+}
+window.addEventListener('error', (e) => showFatalError(e.message));
+window.addEventListener('unhandledrejection', (e) => showFatalError((e.reason && e.reason.message) || String(e.reason)));
+
 const els = {
   importStatus: document.getElementById('import-status'),
   scanCurrentBtn: document.getElementById('scan-current-btn'),
@@ -469,11 +480,22 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.importProgress) renderImportProgress();
 });
 
+// 用这个包一层,是为了防止某一步(比如检测当前标签页)出问题时把整个初始化
+// 流程卡死,导致面板剩下的部分(商品列表、设置等)全都出不来、看起来像是
+// "插件完全打不开"。出错时会直接把错误文字写在面板最上面,方便截图反馈。
+async function safeRun(label, fn) {
+  try {
+    await fn();
+  } catch (err) {
+    showFatalError(`初始化「${label}」时: ${(err && err.message) || err}`);
+  }
+}
+
 (async function init() {
-  await detectCurrentTab();
-  await renderList();
-  await loadSettings();
-  await renderLog();
-  await renderFaqs();
-  await renderImportProgress();
+  await safeRun('检测当前标签页', detectCurrentTab);
+  await safeRun('商品列表', renderList);
+  await safeRun('设置', loadSettings);
+  await safeRun('日志', renderLog);
+  await safeRun('常见问题话术', renderFaqs);
+  await safeRun('导入进度', renderImportProgress);
 })();
