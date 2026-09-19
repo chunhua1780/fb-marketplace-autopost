@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "FB Marketplace 自动发布助手",
+  "version": "1.0.0",
+  "description": "把常用商品信息保存成模板,自动在你自己登录的 Facebook Marketplace 发布页里填表(可选自动点击发布)",
+  "permissions": ["storage", "tabs", "alarms"],
+  "host_permissions": ["https://www.facebook.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "FB Marketplace 自动发布助手"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.facebook.com/marketplace/create/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

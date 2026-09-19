@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8" />
+<title>FB Marketplace 自动发布助手</title>
+<link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <h1>FB Marketplace 自动发布助手</h1>
+  </header>
+
+  <section id="form-section">
+    <h2 id="form-title">新增商品</h2>
+    <input type="hidden" id="editing-id" />
+    <label>标题
+      <input type="text" id="f-title" placeholder="例如:实木餐桌 四人座" />
+    </label>
+    <label>价格
+      <input type="text" id="f-price" placeholder="例如:1200" />
+    </label>
+    <label>类别(需与 Facebook 页面上显示的名称完全一致)
+      <input type="text" id="f-category" placeholder="例如:家具 / Furniture" />
+    </label>
+    <label>成色
+      <input type="text" id="f-condition" placeholder="例如:二手 - 良好 / Used - Good" />
+    </label>
+    <label>地点
+      <input type="text" id="f-location" placeholder="例如:San Francisco, CA" />
+    </label>
+    <label>描述
+      <textarea id="f-description" rows="4" placeholder="商品描述..."></textarea>
+    </label>
+    <label>照片
+      <input type="file" id="f-photos" accept="image/*" multiple />
+    </label>
+    <div id="photo-preview"></div>
+    <div class="row">
+      <button id="save-btn">保存商品</button>
+      <button id="cancel-edit-btn" class="secondary" hidden>取消编辑</button>
+    </div>
+  </section>
+
+  <section id="list-section">
+    <h2>商品队列</h2>
+    <ul id="listing-list"></ul>
+  </section>
+
+  <section id="settings-section">
+    <h2>发布设置</h2>
+    <label>每个商品间隔最短(秒)
+      <input type="number" id="s-min" min="30" />
+    </label>
+    <label>每个商品间隔最长(秒)
+      <input type="number" id="s-max" min="30" />
+    </label>
+    <label class="checkbox">
+      <input type="checkbox" id="s-autopublish" />
+      自动点击「发布」(不勾选则只自动填表,由你手动确认发布,更安全)
+    </label>
+    <button id="save-settings-btn">保存设置</button>
+  </section>
+
+  <section id="run-section">
+    <div class="row">
+      <button id="start-btn">开始发布队列</button>
+      <button id="stop-btn" class="secondary">停止</button>
+    </div>
+    <div id="log"></div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>
