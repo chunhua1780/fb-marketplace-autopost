@@ -57,6 +57,13 @@ async function handleMessage(message, sender) {
       );
       return { ok: true };
 
+    case 'PRODUCT_SELECTED':
+      return handleProductSelected(message.item, message.returnUrl, sender);
+
+    case 'CLEAR_SELECTED_PRODUCTS':
+      await chrome.storage.local.set({ selectedProducts: [] });
+      return { ok: true };
+
     case 'CONTENT_READY': {
       const tabId = sender.tab && sender.tab.id;
       const resolver = tabId != null && pendingReadyResolvers.get(tabId);
@@ -235,6 +242,29 @@ async function checkReposts() {
       tick();
     }
   }
+}
+
+// ---------- 点选式导入:接收在页面上被点中的商品 ----------
+
+async function handleProductSelected(item, returnUrl, sender) {
+  if (!item || !item.itemId) return { ok: false, error: '缺少商品 id' };
+
+  const { selectedProducts = [] } = await chrome.storage.local.get('selectedProducts');
+  if (!selectedProducts.some((p) => p.itemId === item.itemId)) {
+    selectedProducts.push(item);
+    await chrome.storage.local.set({ selectedProducts });
+    await appendLog({
+      level: 'success',
+      text: `已选中:「${item.title || item.itemId}」(目前共选了 ${selectedProducts.length} 件)`,
+    });
+  }
+
+  // returnUrl 只有「点选时这一行没有直接找到链接、被迫跳转到商品详情页」这条
+  // 路径才会带上——这种情况下要自动跳回原来的列表页,让用户可以接着点下一个。
+  if (returnUrl && sender.tab) {
+    chrome.tabs.update(sender.tab.id, { url: returnUrl }).catch(() => {});
+  }
+  return { ok: true };
 }
 
 // ---------- 导入 Facebook 上已有的商品 ----------

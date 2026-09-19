@@ -14,12 +14,14 @@ window.addEventListener('unhandledrejection', (e) => showFatalError((e.reason &&
 
 const els = {
   importStatus: document.getElementById('import-status'),
-  scanCurrentBtn: document.getElementById('scan-current-btn'),
-  copyDiagnosticsBtn: document.getElementById('copy-diagnostics-btn'),
+  startSelectBtn: document.getElementById('start-select-btn'),
+  stopSelectBtn: document.getElementById('stop-select-btn'),
+  selectProgress: document.getElementById('select-progress'),
   scanResults: document.getElementById('scan-results'),
   scanList: document.getElementById('scan-list'),
   selectAllBtn: document.getElementById('select-all-btn'),
   selectNoneBtn: document.getElementById('select-none-btn'),
+  clearSelectionBtn: document.getElementById('clear-selection-btn'),
   importSelectedBtn: document.getElementById('import-selected-btn'),
   importProgress: document.getElementById('import-progress'),
 
@@ -72,9 +74,8 @@ const els = {
 };
 
 let currentPhotos = []; // { name, dataUrl }[]
-let scannedItems = []; // 最近一次「扫描当前页面」的结果
-let scanTabId = null; // 被扫描的那个标签页 id
-let lastDiagnostics = null; // 最近一次扫描的页面诊断信息,出问题时可以复制给开发者
+let scannedItems = []; // 「结束选择」时从 selectedProducts 里读出来、等待勾选确认导入的商品
+let scanTabId = null; // 当前 Facebook 标签页 id
 
 const STATUS_LABEL = {
   pending: '待发布',
@@ -223,7 +224,7 @@ async function renderList() {
   const listings = await getListings();
   els.list.innerHTML = '';
   if (!listings.length) {
-    els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「扫描当前页面」导入,或者手动新增一个</li>';
+    els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「开始点选商品」导入,或者手动新增一个</li>';
     return;
   }
   listings.forEach((l) => {
@@ -274,13 +275,16 @@ async function loadSettings() {
   els.arAiModel.value = settings.aiModel;
 }
 
-// ---------- 从当前标签页扫描/导入商品 ----------
+// ---------- 点选式导入 ----------
+// 不再靠代码去猜页面结构,而是让用户自己在 Facebook 页面上点要导入的商品,
+// 插件只负责在点击发生时把信息接住(见 content-my-listings.js)。这里只管
+// 面板上的开关按钮、显示已经选了多少个、以及「结束选择」后展示确认清单。
 
 async function detectCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace')) {
     els.importStatus.textContent = '⚠️ 当前标签页不是 Facebook Marketplace 页面。请先在浏览器里切换到你的「我的商品/正在出售」页面,再回来点插件图标。';
-    els.scanCurrentBtn.disabled = true;
+    els.startSelectBtn.disabled = true;
     scanTabId = null;
     return;
   }
@@ -289,53 +293,64 @@ async function detectCurrentTab() {
   try {
     await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
     els.importStatus.textContent = `✅ 已连接到当前页面:${tab.url}`;
-    els.scanCurrentBtn.disabled = false;
+    els.startSelectBtn.disabled = false;
   } catch (err) {
     els.importStatus.textContent =
       `⚠️ 插件脚本还没连上这个页面(${tab.url})。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下这个标签页(F5),再重新点插件图标。`;
-    els.scanCurrentBtn.disabled = true;
+    els.startSelectBtn.disabled = true;
   }
 }
 
-els.scanCurrentBtn.addEventListener('click', async () => {
+async function refreshSelectModeUi() {
+  const { selectModeActive, selectedProducts = [] } = await chrome.storage.local.get([
+    'selectModeActive',
+    'selectedProducts',
+  ]);
+  els.startSelectBtn.hidden = !!selectModeActive;
+  els.stopSelectBtn.hidden = !selectModeActive;
+  els.selectProgress.textContent = selectModeActive
+    ? `点选模式已开启,目前已选中 ${selectedProducts.length} 件——回到 Facebook 页面继续点,或者点「结束选择」查看清单。`
+    : selectedProducts.length
+      ? `已经选了 ${selectedProducts.length} 件,还没确认导入。`
+      : '';
+}
+
+els.startSelectBtn.addEventListener('click', async () => {
   if (!scanTabId) return;
-  els.importStatus.textContent = '正在扫描当前页面...';
-  try {
-    const res = await chrome.tabs.sendMessage(scanTabId, { type: 'SCAN_MY_LISTINGS' });
-    if (!res || !res.ok) throw new Error((res && res.error) || '扫描失败');
-    scannedItems = res.items;
-    lastDiagnostics = res.diagnostics || null;
-    els.copyDiagnosticsBtn.disabled = !lastDiagnostics;
-    if (!scannedItems.length) {
-      const d = lastDiagnostics;
-      const counts = d
-        ? `诊断:页面共 ${d.totalLinks} 个链接(${d.marketplaceItemLinks} 个是商品链接)、按链接识别到 ${d.foundByItemLinks} 件、按"Mark as sold"按钮识别到 ${d.foundByActionButtons} 件、有没有定位到"正在出售"区块:${d.foundBySection ? '有' : '没有'}。`
-        : '';
-      const hint =
-        d && d.marketplaceItemLinks === 0
-          ? '这个页面本身就没有商品卡片的链接——请确认你现在停在的是「我的商品/正在出售」这个具体页面(不是搜索结果页、不是首页)。'
-          : '页面上有商品链接,但没能从里面提取出标题/价格——大概率是这个账号的页面结构和预期不一样。';
-      els.importStatus.textContent = `没有扫描到商品。${counts}${hint} 点下面「复制诊断信息」把结果发给开发者可以帮忙精确定位。`;
-      els.scanResults.hidden = true;
-      return;
-    }
-    els.importStatus.textContent = `扫描到 ${scannedItems.length} 件商品,勾选你要导入的,然后点「导入选中的商品」。`;
-    renderScanList();
-    els.scanResults.hidden = false;
-  } catch (err) {
-    els.importStatus.textContent =
-      '扫描失败:' + ((err && err.message) || err) + '。如果插件是刚安装/刚更新的,请先刷新一下那个 Facebook 标签页,再重新点扫描(插件脚本需要页面重新加载一次才会生效)。';
+  const res = await chrome.tabs.sendMessage(scanTabId, { type: 'START_SELECT_MODE' }).catch((err) => ({ ok: false, error: err.message }));
+  if (!res || !res.ok) {
+    els.importStatus.textContent = '开启失败:' + (res && res.error);
+    return;
   }
+  await refreshSelectModeUi();
 });
 
-els.copyDiagnosticsBtn.addEventListener('click', async () => {
-  if (!lastDiagnostics) return;
-  try {
-    await navigator.clipboard.writeText(JSON.stringify(lastDiagnostics, null, 2));
-    els.importStatus.textContent = '诊断信息已复制到剪贴板,粘贴发给开发者就行。';
-  } catch (err) {
-    alert('复制失败,你也可以直接看这里:\n' + JSON.stringify(lastDiagnostics, null, 2));
+els.stopSelectBtn.addEventListener('click', async () => {
+  if (scanTabId) {
+    await chrome.tabs.sendMessage(scanTabId, { type: 'STOP_SELECT_MODE' }).catch(() => {});
+  } else {
+    await chrome.storage.local.set({ selectModeActive: false });
   }
+  await refreshSelectModeUi();
+
+  const { selectedProducts = [] } = await chrome.storage.local.get('selectedProducts');
+  scannedItems = selectedProducts;
+  if (!scannedItems.length) {
+    els.importStatus.textContent = '还没有选中任何商品。回到 Facebook 页面,把鼠标移到你的商品上点一下试试。';
+    els.scanResults.hidden = true;
+    return;
+  }
+  els.importStatus.textContent = `已选中 ${scannedItems.length} 件商品,确认下面的清单,然后点「导入选中的商品」。`;
+  renderScanList();
+  els.scanResults.hidden = false;
+});
+
+els.clearSelectionBtn.addEventListener('click', async () => {
+  if (!confirm('确定清空已经点选的商品,重新开始选吗?')) return;
+  await chrome.runtime.sendMessage({ type: 'CLEAR_SELECTED_PRODUCTS' });
+  scannedItems = [];
+  els.scanResults.hidden = true;
+  await refreshSelectModeUi();
 });
 
 function renderScanList() {
@@ -370,7 +385,14 @@ els.importSelectedBtn.addEventListener('click', async () => {
     return;
   }
   const res = await chrome.runtime.sendMessage({ type: 'IMPORT_SELECTED', items: selected });
-  if (!res || !res.ok) alert('无法开始导入: ' + (res && res.error));
+  if (!res || !res.ok) {
+    alert('无法开始导入: ' + (res && res.error));
+    return;
+  }
+  await chrome.runtime.sendMessage({ type: 'CLEAR_SELECTED_PRODUCTS' });
+  scannedItems = [];
+  els.scanResults.hidden = true;
+  els.importStatus.textContent = '已开始导入,进度见下方。';
 });
 
 async function renderImportProgress() {
@@ -478,6 +500,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.runLog) renderLog();
   if (changes.faqs) renderFaqs();
   if (changes.importProgress) renderImportProgress();
+  if (changes.selectedProducts || changes.selectModeActive) refreshSelectModeUi();
 });
 
 // 用这个包一层,是为了防止某一步(比如检测当前标签页)出问题时把整个初始化
@@ -493,6 +516,7 @@ async function safeRun(label, fn) {
 
 (async function init() {
   await safeRun('检测当前标签页', detectCurrentTab);
+  await safeRun('点选状态', refreshSelectModeUi);
   await safeRun('商品列表', renderList);
   await safeRun('设置', loadSettings);
   await safeRun('日志', renderLog);

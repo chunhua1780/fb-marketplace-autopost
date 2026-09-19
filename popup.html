@@ -11,21 +11,25 @@
   </header>
 
   <section id="import-section">
-    <h2>从当前页面导入商品</h2>
+    <h2>点选导入我已有的商品</h2>
     <p class="hint">
       先在浏览器里打开你自己 Facebook 的「Marketplace → 我的商品/正在出售」页面,
-      保持它是你当前正在看的这个标签页,再点下面「扫描当前页面」。扫描时页面会
-      自动上下滚动一下(为了把没加载出来的商品也加载出来),属于正常现象。
+      保持它是你当前正在看的这个标签页。点「开始点选商品」后回到那个页面,把
+      鼠标移到你自己的商品上会出现蓝色高亮框,点一下就选中(会跳出绿色"已选中"
+      提示);可以一直点选多个,这个面板可以关掉没关系,选完了再打开点
+      「结束选择」查看清单。
     </p>
     <div id="import-status" class="hint"></div>
     <div class="row">
-      <button id="scan-current-btn">扫描当前页面</button>
-      <button id="copy-diagnostics-btn" class="secondary" disabled>复制诊断信息</button>
+      <button id="start-select-btn">开始点选商品</button>
+      <button id="stop-select-btn" class="secondary" hidden>结束选择</button>
     </div>
+    <div id="select-progress" class="hint"></div>
     <div id="scan-results" hidden>
       <div class="row">
         <button id="select-all-btn" class="secondary">全选</button>
         <button id="select-none-btn" class="secondary">全不选</button>
+        <button id="clear-selection-btn" class="secondary danger">清空重选</button>
       </div>
       <ul id="scan-list"></ul>
       <button id="import-selected-btn">导入选中的商品</button>

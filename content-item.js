@@ -95,6 +95,29 @@
     return { ok: true };
   }
 
+  // 「点选式导入」的兜底路径:如果在商品列表页点选的那一行里没能直接找到商品
+  // 链接,content-my-listings.js 会把当时抓到的标题/价格/缩略图先存进
+  // pendingClickCapture,再放行那次点击、让 Facebook 自己跳过来。这里落地后
+  // 检查有没有这个待处理的记录,有的话就从当前这个真实网址里读出 id,把信息
+  // 拼成一条完整记录发给 background,再自动跳回原来的列表页,不用手动点后退。
+  async function checkPendingClickCapture() {
+    const { pendingClickCapture } = await chrome.storage.local.get('pendingClickCapture');
+    if (!pendingClickCapture) return;
+    await chrome.storage.local.remove('pendingClickCapture');
+
+    const m = location.href.match(/\/marketplace\/item\/(\d+)/);
+    if (!m) return; // 跳到的不是商品页,忽略
+
+    const itemId = m[1];
+    const { title, priceText, thumbUrl, returnUrl } = pendingClickCapture;
+    chrome.runtime.sendMessage({
+      type: 'PRODUCT_SELECTED',
+      item: { itemId, title, priceText, thumbUrl, sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/` },
+      returnUrl,
+    });
+  }
+  checkPendingClickCapture();
+
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
