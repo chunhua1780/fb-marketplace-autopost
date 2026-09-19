@@ -51,8 +51,10 @@ async function handleMessage(message, sender) {
     case 'REPOST_NOW':
       return repostNow(message.id);
 
-    case 'START_IMPORT':
-      startImport().catch((err) => appendLog({ level: 'error', text: '导入失败: ' + ((err && err.message) || err) }));
+    case 'IMPORT_SELECTED':
+      startImportSelected(message.items).catch((err) =>
+        appendLog({ level: 'error', text: '导入失败: ' + ((err && err.message) || err) })
+      );
       return { ok: true };
 
     case 'CONTENT_READY': {
@@ -236,48 +238,39 @@ async function checkReposts() {
 }
 
 // ---------- 导入 Facebook 上已有的商品 ----------
+// 扫描这一步现在由 popup.js 直接对着用户当前打开的那个 Facebook 标签页做
+// (content-my-listings.js 已经注入在那个页面里),不再由背景脚本去猜网址、
+// 另外开一个标签页——这样才不会出现「找不到/乱跳」的问题。
+// 这里只负责「把选中的商品逐个打开编辑页读取详情」这一步,并汇报进度。
 
-async function startImport() {
-  const settings = await getSettings();
-  const url = settings.myListingsUrl || 'https://www.facebook.com/marketplace/you/selling';
-  await appendLog({ level: 'info', text: '正在打开商品管理页面扫描现有商品...' });
+async function startImportSelected(items) {
+  if (!items || !items.length) return;
+  const listings = await getListings();
+  const known = new Set(listings.map((l) => l.sourceItemId).filter(Boolean));
+  const queue = items.filter((it) => !known.has(it.itemId));
 
-  let tab;
-  try {
-    tab = await chrome.tabs.create({ url, active: false });
-    await waitForContentReady(tab.id, 25000);
-    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCAN_MY_LISTINGS' });
-    if (!res || !res.ok) throw new Error((res && res.error) || '扫描失败');
-
-    const listings = await getListings();
-    const known = new Set(listings.map((l) => l.sourceItemId).filter(Boolean));
-    const queue = res.items.filter((it) => !known.has(it.itemId));
-    await chrome.storage.local.set({ importQueue: queue });
-
-    if (!res.items.length) {
-      await appendLog({
-        level: 'error',
-        text: '没有扫描到任何商品,请确认「设置」里的商品管理页面网址是否正确(打开你自己的 Facebook 商品管理页,把地址栏网址复制过来)。',
-      });
-      return;
-    }
-    await appendLog({
-      level: 'info',
-      text: `扫描到 ${res.items.length} 件商品,其中 ${queue.length} 件是新的,开始逐个导入详情...`,
-    });
-  } finally {
-    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  if (!queue.length) {
+    await appendLog({ level: 'info', text: '选中的商品都已经导入过了,没有新的要导入' });
+    return;
   }
 
+  await chrome.storage.local.set({ importQueue: queue, importProgress: { done: 0, total: queue.length } });
+  await appendLog({ level: 'info', text: `开始导入 ${queue.length} 件商品的详情(会依次打开每件商品的编辑页读取)...` });
   importTick();
 }
 
 async function importTick() {
   const { importQueue = [] } = await chrome.storage.local.get('importQueue');
+  const { importProgress = { done: 0, total: 0 } } = await chrome.storage.local.get('importProgress');
+
   if (!importQueue.length) {
-    await appendLog({ level: 'info', text: '导入完成' });
+    if (importProgress.total) {
+      await appendLog({ level: 'info', text: `导入完成,共导入 ${importProgress.done} 件商品` });
+    }
+    await chrome.storage.local.set({ importProgress: { done: 0, total: 0 } });
     return;
   }
+
   const [next, ...rest] = importQueue;
   await chrome.storage.local.set({ importQueue: rest });
 
@@ -307,6 +300,10 @@ async function importTick() {
   } finally {
     if (tab) chrome.tabs.remove(tab.id).catch(() => {});
   }
+
+  await chrome.storage.local.set({
+    importProgress: { done: importProgress.total - rest.length, total: importProgress.total },
+  });
 
   chrome.alarms.create(ALARM_IMPORT_TICK, { delayInMinutes: (5 + Math.random() * 5) / 60 });
 }

@@ -2,9 +2,14 @@
 // getSettings / getFaqs / saveFaqs 等公共方法(popup.html 里已经先加载了 storage.js)
 
 const els = {
-  myListingsUrl: document.getElementById('s-my-listings-url'),
-  saveImportUrlBtn: document.getElementById('save-import-url-btn'),
-  startImportBtn: document.getElementById('start-import-btn'),
+  importStatus: document.getElementById('import-status'),
+  scanCurrentBtn: document.getElementById('scan-current-btn'),
+  scanResults: document.getElementById('scan-results'),
+  scanList: document.getElementById('scan-list'),
+  selectAllBtn: document.getElementById('select-all-btn'),
+  selectNoneBtn: document.getElementById('select-none-btn'),
+  importSelectedBtn: document.getElementById('import-selected-btn'),
+  importProgress: document.getElementById('import-progress'),
 
   title: document.getElementById('f-title'),
   price: document.getElementById('f-price'),
@@ -55,6 +60,8 @@ const els = {
 };
 
 let currentPhotos = []; // { name, dataUrl }[]
+let scannedItems = []; // 最近一次「扫描当前页面」的结果
+let scanTabId = null; // 被扫描的那个标签页 id
 
 const STATUS_LABEL = {
   pending: '待发布',
@@ -203,7 +210,7 @@ async function renderList() {
   const listings = await getListings();
   els.list.innerHTML = '';
   if (!listings.length) {
-    els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「导入我已有的商品」,或者手动新增一个</li>';
+    els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「扫描当前页面」导入,或者手动新增一个</li>';
     return;
   }
   listings.forEach((l) => {
@@ -236,7 +243,6 @@ async function renderList() {
 
 async function loadSettings() {
   const settings = await getSettings();
-  els.myListingsUrl.value = settings.myListingsUrl;
 
   els.sMin.value = settings.minDelaySeconds;
   els.sMax.value = settings.maxDelaySeconds;
@@ -255,15 +261,86 @@ async function loadSettings() {
   els.arAiModel.value = settings.aiModel;
 }
 
-els.saveImportUrlBtn.addEventListener('click', async () => {
-  const settings = await getSettings();
-  await saveSettings({ ...settings, myListingsUrl: els.myListingsUrl.value.trim() });
+// ---------- 从当前标签页扫描/导入商品 ----------
+
+async function detectCurrentTab() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace')) {
+    els.importStatus.textContent = '⚠️ 当前标签页不是 Facebook Marketplace 页面。请先在浏览器里切换到你的「我的商品/正在出售」页面,再回来点「扫描当前页面」。';
+    els.scanCurrentBtn.disabled = true;
+    scanTabId = null;
+    return;
+  }
+  scanTabId = tab.id;
+  els.importStatus.textContent = `✅ 当前标签页:${tab.url}`;
+  els.scanCurrentBtn.disabled = false;
+}
+
+els.scanCurrentBtn.addEventListener('click', async () => {
+  if (!scanTabId) return;
+  els.importStatus.textContent = '正在扫描当前页面...';
+  try {
+    const res = await chrome.tabs.sendMessage(scanTabId, { type: 'SCAN_MY_LISTINGS' });
+    if (!res || !res.ok) throw new Error((res && res.error) || '扫描失败');
+    scannedItems = res.items;
+    if (!scannedItems.length) {
+      els.importStatus.textContent = '没有在当前页面扫描到商品。请确认这个页面里能直接看到你的商品卡片(可能需要先手动滚动看看有没有加载出来,或者这不是「我的商品」页面)。';
+      els.scanResults.hidden = true;
+      return;
+    }
+    els.importStatus.textContent = `扫描到 ${scannedItems.length} 件商品,勾选你要导入的,然后点「导入选中的商品」。`;
+    renderScanList();
+    els.scanResults.hidden = false;
+  } catch (err) {
+    els.importStatus.textContent =
+      '扫描失败:' + ((err && err.message) || err) + '。如果插件是刚安装/刚更新的,请先刷新一下那个 Facebook 标签页,再重新点扫描(插件脚本需要页面重新加载一次才会生效)。';
+  }
 });
 
-els.startImportBtn.addEventListener('click', async () => {
-  const res = await chrome.runtime.sendMessage({ type: 'START_IMPORT' });
+function renderScanList() {
+  els.scanList.innerHTML = '';
+  scannedItems.forEach((it, idx) => {
+    const li = document.createElement('li');
+    li.className = 'scan-item';
+    li.innerHTML = `
+      <label class="scan-item-label">
+        <input type="checkbox" data-idx="${idx}" checked />
+        ${it.thumbUrl ? `<img src="${escapeHtml(it.thumbUrl)}" class="thumb" />` : ''}
+        <span class="scan-item-text">${escapeHtml(it.title)}${it.priceText ? ` · ${escapeHtml(it.priceText)}` : ''}</span>
+      </label>
+    `;
+    els.scanList.appendChild(li);
+  });
+}
+
+els.selectAllBtn.addEventListener('click', () => {
+  els.scanList.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = true));
+});
+
+els.selectNoneBtn.addEventListener('click', () => {
+  els.scanList.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = false));
+});
+
+els.importSelectedBtn.addEventListener('click', async () => {
+  const checkedIdx = Array.from(els.scanList.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => Number(cb.dataset.idx));
+  const selected = checkedIdx.map((i) => scannedItems[i]);
+  if (!selected.length) {
+    alert('先勾选至少一个商品');
+    return;
+  }
+  const res = await chrome.runtime.sendMessage({ type: 'IMPORT_SELECTED', items: selected });
   if (!res || !res.ok) alert('无法开始导入: ' + (res && res.error));
 });
+
+async function renderImportProgress() {
+  const { importProgress } = await chrome.storage.local.get('importProgress');
+  if (!importProgress || !importProgress.total) {
+    els.importProgress.textContent = '';
+    return;
+  }
+  const done = Math.min(importProgress.done, importProgress.total);
+  els.importProgress.textContent = `导入进度:${done} / ${importProgress.total}${done >= importProgress.total ? '(完成)' : ''}`;
+}
 
 els.saveSettingsBtn.addEventListener('click', async () => {
   const settings = await getSettings();
@@ -359,11 +436,14 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.listings) renderList();
   if (changes.runLog) renderLog();
   if (changes.faqs) renderFaqs();
+  if (changes.importProgress) renderImportProgress();
 });
 
 (async function init() {
+  await detectCurrentTab();
   await renderList();
   await loadSettings();
   await renderLog();
   await renderFaqs();
+  await renderImportProgress();
 })();

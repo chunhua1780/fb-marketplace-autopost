@@ -11,16 +11,24 @@
   </header>
 
   <section id="import-section">
-    <h2>导入我已有的商品</h2>
+    <h2>从当前页面导入商品</h2>
     <p class="hint">
-      打开你自己 Facebook 的「商品管理/正在出售」页面,把地址栏网址复制到下面(第一次用先确认一下,不同账号/地区可能不一样)。
+      先在浏览器里打开你自己 Facebook 的「Marketplace → 我的商品/正在出售」页面,
+      保持它是你当前正在看的这个标签页,再点下面「扫描当前页面」。扫描时页面会
+      自动上下滚动一下(为了把没加载出来的商品也加载出来),属于正常现象。
     </p>
-    <label>商品管理页面网址
-      <input type="text" id="s-my-listings-url" placeholder="https://www.facebook.com/marketplace/you/selling" />
-    </label>
+    <div id="import-status" class="hint"></div>
     <div class="row">
-      <button id="save-import-url-btn" class="secondary">保存网址</button>
-      <button id="start-import-btn">开始扫描并导入</button>
+      <button id="scan-current-btn">扫描当前页面</button>
+    </div>
+    <div id="scan-results" hidden>
+      <div class="row">
+        <button id="select-all-btn" class="secondary">全选</button>
+        <button id="select-none-btn" class="secondary">全不选</button>
+      </div>
+      <ul id="scan-list"></ul>
+      <button id="import-selected-btn">导入选中的商品</button>
+      <div id="import-progress" class="hint"></div>
     </div>
   </section>
 

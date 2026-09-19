@@ -7,10 +7,6 @@ const DEFAULT_SETTINGS = {
   // false = 只自动填表,停在发布前一步,由你本人手动点击「发布」确认(默认更安全)
   autoPublish: false,
 
-  // 「我的商品」管理页面网址,用于导入现有商品(不同账号/地区可能不一样,
-  // 如果扫描不到东西,先打开自己 Facebook 的商品管理页看看实际网址,改这里)
-  myListingsUrl: 'https://www.facebook.com/marketplace/you/selling',
-
   // 重新上架时是否允许自动删除 Facebook 上的旧商品——这是全局总开关,
   // 默认关闭;要真正生效还需要在每条商品自己的设置里也打开 deleteOldOnRepost
   autoDeleteOldListings: false,
