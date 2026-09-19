@@ -296,7 +296,8 @@ async function detectCurrentTab() {
     els.startSelectBtn.disabled = false;
   } catch (err) {
     els.importStatus.textContent =
-      `⚠️ 插件脚本还没连上这个页面(${tab.url})。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下这个标签页(F5),再重新点插件图标。`;
+      `⚠️ 插件脚本还没连上这个页面。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下这个标签页(F5),再重新点插件图标。\n` +
+      `网址:${tab.url}\n原始错误:${(err && err.message) || err}`;
     els.startSelectBtn.disabled = true;
   }
 }
@@ -514,7 +515,13 @@ async function safeRun(label, fn) {
   }
 }
 
+function renderVersionBadge() {
+  const badge = document.getElementById('version-badge');
+  if (badge) badge.textContent = 'v' + chrome.runtime.getManifest().version;
+}
+
 (async function init() {
+  renderVersionBadge();
   await safeRun('检测当前标签页', detectCurrentTab);
   await safeRun('点选状态', refreshSelectModeUi);
   await safeRun('商品列表', renderList);

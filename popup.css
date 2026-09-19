@@ -177,6 +177,12 @@ button.danger {
   color: #777;
   margin: 0 0 8px;
   line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+#version-badge {
+  margin: 0 0 6px;
+  color: #999;
 }
 
 #scan-list {
