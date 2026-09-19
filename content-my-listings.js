@@ -115,6 +115,10 @@
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === 'PING') {
+      sendResponse({ ok: true });
+      return;
+    }
     if (message.type === 'SCAN_MY_LISTINGS') {
       autoScrollToLoadAll().then(() => {
         const items = scan();

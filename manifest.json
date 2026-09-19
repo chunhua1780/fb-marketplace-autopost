@@ -27,7 +27,7 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://www.facebook.com/marketplace/you/*"],
+      "matches": ["https://www.facebook.com/marketplace/*", "https://www.facebook.com/marketplace"],
       "js": ["field-utils.js", "content-my-listings.js"],
       "run_at": "document_idle"
     },

@@ -4,17 +4,23 @@
 // 属性)做的启发式匹配,不是官方接口,Facebook 改版可能会让它们失效——所以这里
 // 尽量对每一种信息都准备了不止一种查找方式,找不到时也会收集诊断信息方便定位。
 
-const FB_LABELS = {
-  title: ['Title', '标题', '標題'],
-  price: ['Price', '价格', '價格'],
-  description: ['Description', '描述'],
-  category: ['Category', '类别', '分類', '類別'],
-  condition: ['Condition', '状况', '狀況', '成色'],
-  location: ['Location', '地点', '地點'],
-  next: ['Next', '下一步'],
-  publish: ['Publish', '发布', '發佈', '刊登'],
-  editListing: ['Edit listing', 'Edit Listing', '编辑商品', '編輯商品', 'Edit'],
-};
+// 用 window.FB_LABELS 而不是顶层 const 来定义,是因为现在有几个 content_scripts
+// 的 matches 范围会互相重叠(比如商品管理页的广泛匹配会盖到发布页/单品页),
+// 同一个页面上 field-utils.js 可能被注入不止一次——顶层 const 被执行第二次会直接
+// 报 "already been declared" 让整个内容脚本崩掉。用这种写法即使被注入多次也没事。
+if (typeof window.FB_LABELS === 'undefined') {
+  window.FB_LABELS = {
+    title: ['Title', '标题', '標題'],
+    price: ['Price', '价格', '價格'],
+    description: ['Description', '描述'],
+    category: ['Category', '类别', '分類', '類別'],
+    condition: ['Condition', '状况', '狀況', '成色'],
+    location: ['Location', '地点', '地點'],
+    next: ['Next', '下一步'],
+    publish: ['Publish', '发布', '發佈', '刊登'],
+    editListing: ['Edit listing', 'Edit Listing', '编辑商品', '編輯商品', 'Edit'],
+  };
+}
 
 function fbNormalize(text) {
   return (text || '').trim().toLowerCase();

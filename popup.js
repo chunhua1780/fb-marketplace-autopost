@@ -268,14 +268,22 @@ async function loadSettings() {
 async function detectCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace')) {
-    els.importStatus.textContent = '⚠️ 当前标签页不是 Facebook Marketplace 页面。请先在浏览器里切换到你的「我的商品/正在出售」页面,再回来点「扫描当前页面」。';
+    els.importStatus.textContent = '⚠️ 当前标签页不是 Facebook Marketplace 页面。请先在浏览器里切换到你的「我的商品/正在出售」页面,再回来点插件图标。';
     els.scanCurrentBtn.disabled = true;
     scanTabId = null;
     return;
   }
   scanTabId = tab.id;
-  els.importStatus.textContent = `✅ 当前标签页:${tab.url}`;
-  els.scanCurrentBtn.disabled = false;
+  // 光看网址不够——先实际连一下插件脚本,确认它真的已经注入到这个页面里了
+  try {
+    await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+    els.importStatus.textContent = `✅ 已连接到当前页面:${tab.url}`;
+    els.scanCurrentBtn.disabled = false;
+  } catch (err) {
+    els.importStatus.textContent =
+      `⚠️ 插件脚本还没连上这个页面(${tab.url})。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下这个标签页(F5),再重新点插件图标。`;
+    els.scanCurrentBtn.disabled = true;
+  }
 }
 
 els.scanCurrentBtn.addEventListener('click', async () => {
@@ -288,8 +296,13 @@ els.scanCurrentBtn.addEventListener('click', async () => {
     lastDiagnostics = res.diagnostics || null;
     els.copyDiagnosticsBtn.disabled = !lastDiagnostics;
     if (!scannedItems.length) {
-      els.importStatus.textContent =
-        '没有在当前页面扫描到商品。请确认这页面里能直接看到你的商品卡片(可能需要先手动滚动看看有没有加载出来,或者这不是「我的商品」页面)。点「复制诊断信息」把结果发给开发者可以帮忙定位。';
+      const d = lastDiagnostics;
+      const counts = d ? `本页面共有 ${d.totalLinks} 个链接,其中 ${d.marketplaceItemLinks} 个是商品链接。` : '';
+      const hint =
+        d && d.marketplaceItemLinks === 0
+          ? '这个页面本身就没有商品卡片的链接——请确认你现在停在的是「我的商品/正在出售」这个具体页面(不是搜索结果页、不是首页),而不是别的 Marketplace 页面。'
+          : '页面上有商品链接,但没能从里面提取出标题/价格——大概率是这个账号的页面卡片结构和预期不一样。';
+      els.importStatus.textContent = `没有扫描到商品。${counts}${hint} 点下面「复制诊断信息」把结果发给开发者可以帮忙精确定位。`;
       els.scanResults.hidden = true;
       return;
     }
