@@ -148,34 +148,43 @@
     return !document.querySelector('[role="dialog"]');
   }
 
+  // itemId 是 Facebook 那边的真实商品编号,只用在两个地方:导入去重、以及
+  // 「重新上架后自动删除旧版本」。读不到也完全不影响导入——标题/价格/图片这些
+  // 读到了就先存下来,用插件自己的编号(genListing 里自动生成)管理,后面
+  // 「重新上架」照样能用,只是少了「自动删除 Facebook 上那条旧的」这一个可选
+  // 功能而已。之前的版本读不到 itemId 就整条数据都不存,才是「读一个丢一个」
+  // 的真正原因。
   async function saveImportedListing(itemId, data) {
     const listings = await getListings();
-    if (!listings.some((l) => l.sourceItemId === itemId)) {
-      listings.push(
-        genListing({
-          title: data.title || '',
-          price: data.price || data.priceText || '',
-          category: data.category || '',
-          condition: data.condition || '',
-          description: data.description || '',
-          location: data.location || '',
-          photos: data.photos || [],
-          sourceItemId: itemId,
-          sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/`,
-          status: 'imported',
-          importedAt: Date.now(),
-        })
-      );
-      await saveListings(listings);
+    if (itemId && listings.some((l) => l.sourceItemId === itemId)) {
+      return; // 这个 Facebook 商品已经导入过了,不用重复存
     }
-    await appendLog({ level: 'success', text: `已导入:「${data.title || itemId}」` });
+    listings.push(
+      genListing({
+        title: data.title || '',
+        price: data.price || data.priceText || '',
+        category: data.category || '',
+        condition: data.condition || '',
+        description: data.description || '',
+        location: data.location || '',
+        photos: data.photos || [],
+        sourceItemId: itemId || null,
+        sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
+        status: 'imported',
+        importedAt: Date.now(),
+      })
+    );
+    await saveListings(listings);
+    await appendLog({
+      level: 'success',
+      text: `已导入:「${data.title || itemId || '商品'}」${itemId ? '' : '(没能确认到 Facebook 原始编号,重新上架后不能自动删除旧版本,其他功能不受影响)'}`,
+    });
   }
 
   // 点一行商品之后:顺着 Facebook 自己弹出的详情对话框走——读基本信息,点它的
-  // 「Edit Listing」展开完整表单读全部字段,再把对话框关掉。对话框没弹出来的
-  // 极少数情况,退回旧办法:能直接从这一行拿到商品链接就直接存,拿不到就记下
-  // 「回来的网址」放行这次点击,让 Facebook 自己决定怎么跳,content-item.js 落地
-  // 后会接着处理。
+  // 「Edit Listing」展开完整表单读全部字段,再把对话框关掉。不管每一步能读到
+  // 多完整,最后都会存下来(存不到 Facebook 真实编号就用插件自己的编号),不会
+  // 因为某一项信息缺失就把整条数据丢掉。
   async function captureFromClick(row) {
     const rowInfo = extractQuickInfo(row);
     const badge = showBadge(row, '⏳ 正在读取...', '#1877f2');
@@ -184,16 +193,14 @@
       const dialog = await waitFor(() => document.querySelector('[role="dialog"]'), { timeout: 4000 });
 
       if (!dialog) {
+        // 没弹出详情对话框(少见情况):能从这一行直接拿到商品链接就用真实编号,
+        // 拿不到就直接用插件自己的编号存——标题/价格/缩略图这些能读到多少算多少,
+        // 不再为了等一个可能压根不会发生的跳转而把这条数据一直悬着不存。
         const link = row.querySelector('a[href*="/marketplace/item/"]');
         const m = link && (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
-        if (m) {
-          await saveImportedListing(m[1], rowInfo);
-          badge.textContent = '✅ 已导入';
-          badge.style.background = '#16794d';
-        } else {
-          chrome.storage.local.set({ pendingClickCapture: { ...rowInfo, returnUrl: location.href, capturedAt: Date.now() } });
-          badge.textContent = '↪️ 正在跳转确认...';
-        }
+        await saveImportedListing(m ? m[1] : null, rowInfo);
+        badge.textContent = m ? '✅ 已导入' : '✅ 已导入(无 FB 编号)';
+        badge.style.background = '#16794d';
         setTimeout(() => badge.remove(), 1500);
         return;
       }
@@ -240,18 +247,9 @@
       await fbSleep(300);
 
       const data = full || dialogInfo || rowInfo;
-      if (!itemId) {
-        badge.textContent = '⚠️ 没识别到商品编号';
-        badge.style.background = '#c0362c';
-        await appendLog({
-          level: 'error',
-          text: `「${data.title || '商品'}」没能确认到商品编号,已跳过,请手动处理。`,
-        });
-      } else {
-        await saveImportedListing(itemId, data);
-        badge.textContent = '✅ 已导入';
-        badge.style.background = '#16794d';
-      }
+      await saveImportedListing(itemId, data);
+      badge.textContent = itemId ? '✅ 已导入' : '✅ 已导入(无 FB 编号)';
+      badge.style.background = '#16794d';
       setTimeout(() => badge.remove(), 1500);
     } catch (err) {
       badge.textContent = '⚠️ 出错了';
