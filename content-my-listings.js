@@ -40,17 +40,38 @@
   }
 
   const PRICE_RE = /(?:[$€£¥₹]\s?\d[\d,.]*|[A-Z]{2,4}\s?\d[\d,.]*)/;
+  // Facebook 的商品链接经常会在 aria-label 里放一整句无障碍朗读文字,格式类似
+  // "标题, 价格, 城市, 地区" 这种逗号分隔——参考了公开的 Facebook Marketplace
+  // 抓取工具(如 github.com/danyk20/facebook-marketplace-scraper)用同样的字段
+  // 顺序解析,这一句如果存在,通常比自己拼行内文字更准。
+  const ARIA_RE = /^(?<title>.*?),\s*(?<price>[^,]*\d[^,]*),/;
 
   function extractFromRow(row) {
+    const link = row.querySelector('a[href*="/marketplace/item/"]');
+    const ariaLabel = (link && link.getAttribute('aria-label')) || row.getAttribute('aria-label') || '';
+    const ariaMatch = ariaLabel.match(ARIA_RE);
+
     const text = (row.innerText || row.textContent || '').trim();
     const img = row.querySelector('img');
-    const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
     const priceMatch = text.match(PRICE_RE);
-    return {
-      title: lines[0] || '',
-      priceText: priceMatch ? priceMatch[0] : lines[1] || '',
-      thumbUrl: img ? img.src : '',
-    };
+
+    let title = ariaMatch && ariaMatch.groups.title.trim();
+    if (!title) {
+      // 退回按行取第一行;如果第一行看起来不像标题(太短、或者就是价格本身),
+      // 改成取这一行里所有 <span> 文字里最长的那一段(价格/地点通常比标题短)。
+      const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+      title = lines[0] || '';
+      if (!title || (priceMatch && title === priceMatch[0])) {
+        const spanTexts = Array.from(row.querySelectorAll('span'))
+          .map((s) => s.textContent.trim())
+          .filter((t) => t && !(priceMatch && t.includes(priceMatch[0])));
+        if (spanTexts.length) title = spanTexts.reduce((a, b) => (b.length > a.length ? b : a), '');
+      }
+    }
+
+    const priceText = (ariaMatch && ariaMatch.groups.price.trim()) || (priceMatch ? priceMatch[0] : '');
+
+    return { title, priceText, thumbUrl: img ? img.src : '' };
   }
 
   function isPlausibleRow(row) {
