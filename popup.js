@@ -75,6 +75,7 @@ const STATUS_LABEL = {
   filled_awaiting_review: '已填表,待你确认发布',
   posted: '已发布',
   imported: '已从 Facebook 导入(未在队列中)',
+  reading_details: '⏳ 正在后台读取完整信息...',
   failed: '失败',
 };
 

@@ -229,12 +229,30 @@ async function queueDetailRead(itemId, quickInfo) {
     return { ok: true };
   }
 
+  // 先立刻存一条「标题/价格已知,详情读取中」的占位记录——这样用户在面板里
+  // 点了第 1、2、3 个商品,马上就能看到每一条对应的是什么商品(比如「笔记本
+  // 电脑」「充电器」),不用等后台标签页把完整详情读完才第一次出现在列表里。
+  const listings = await getListings();
+  if (!listings.some((l) => l.sourceItemId === itemId)) {
+    listings.push(
+      genListing({
+        title: quickInfo.title || '',
+        price: quickInfo.priceText || '',
+        sourceItemId: itemId,
+        sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/`,
+        status: 'reading_details',
+        importedAt: Date.now(),
+      })
+    );
+    await saveListings(listings);
+  }
+
   const { detailReadQueue } = await chrome.storage.local.get('detailReadQueue');
   const queue = detailReadQueue || [];
   if (!queue.some((q) => q.itemId === itemId)) {
     queue.push({ itemId, quickInfo, queuedAt: Date.now() });
     await chrome.storage.local.set({ detailReadQueue: queue });
-    await appendLog({ level: 'info', text: `「${quickInfo.title || itemId}」已加入详情读取队列,稍后自动在后台读取完整信息` });
+    await appendLog({ level: 'info', text: `已选中「${quickInfo.title || itemId}」,后台正在读取完整信息...` });
   }
   detailReadTick();
   return { ok: true };
@@ -287,31 +305,54 @@ async function processDetailRead(item) {
 // itemId 是 Facebook 那边的真实商品编号,只用在两个地方:导入去重、以及
 // 「重新上架后自动删除旧版本」。读不到也完全不影响导入——标题/价格这些读到了
 // 就先存下来,用插件自己的编号(genListing 里自动生成)管理。
+//
+// 队列里的商品在 queueDetailRead 那一步已经先存过一条「占位记录」(标题/价格
+// 已知,状态是 reading_details),这里读完整详情之后不是再新插一条,而是把同一
+// 条记录原地更新——不然面板列表里会看到同一个商品出现两次。
 async function saveScrapedListing(itemId, scraped, quickInfo) {
   const listings = await getListings();
-  if (itemId && listings.some((l) => l.sourceItemId === itemId)) return;
-  listings.push(
-    genListing({
-      title: scraped.title || quickInfo.title || '',
-      price: scraped.price || quickInfo.priceText || '',
-      category: scraped.category || '',
-      condition: scraped.condition || '',
-      description: scraped.description || '',
-      location: scraped.location || '',
-      photos: scraped.photos || [],
-      sourceItemId: itemId || null,
-      sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
-      status: 'imported',
-      importedAt: Date.now(),
-    })
-  );
+  const idx = itemId ? listings.findIndex((l) => l.sourceItemId === itemId) : -1;
+  const title = scraped.title || quickInfo.title || (idx !== -1 ? listings[idx].title : '');
+  const fields = {
+    title,
+    price: scraped.price || quickInfo.priceText || (idx !== -1 ? listings[idx].price : ''),
+    category: scraped.category || '',
+    condition: scraped.condition || '',
+    description: scraped.description || '',
+    location: scraped.location || '',
+    photos: scraped.photos || [],
+    status: 'imported',
+  };
+  if (idx !== -1) {
+    listings[idx] = { ...listings[idx], ...fields };
+  } else {
+    listings.push(
+      genListing({
+        ...fields,
+        sourceItemId: itemId || null,
+        sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
+        importedAt: Date.now(),
+      })
+    );
+  }
   await saveListings(listings);
-  await appendLog({ level: 'success', text: `已导入完整信息:「${scraped.title || quickInfo.title || itemId}」` });
+  await appendLog({ level: 'success', text: `已读取完整信息:「${title || itemId}」` });
 }
 
 async function saveBasicListing(itemId, quickInfo) {
   const listings = await getListings();
-  if (itemId && listings.some((l) => l.sourceItemId === itemId)) return;
+  const idx = itemId ? listings.findIndex((l) => l.sourceItemId === itemId) : -1;
+  if (idx !== -1) {
+    // 占位记录已经在了(queueDetailRead 那一步存的),完整详情没读成功,
+    // 把状态从「读取中」改回可用,标题/价格保留原样,不然会一直卡在「读取中」。
+    listings[idx].status = 'imported';
+    await saveListings(listings);
+    await appendLog({
+      level: 'success',
+      text: `「${listings[idx].title || itemId}」完整详情读取失败,已保留标题/价格,可以之后手动重试`,
+    });
+    return;
+  }
   listings.push(
     genListing({
       title: quickInfo.title || '',
@@ -325,7 +366,7 @@ async function saveBasicListing(itemId, quickInfo) {
   await saveListings(listings);
   await appendLog({
     level: 'success',
-    text: `已导入基本信息(标题/价格):「${quickInfo.title || itemId || '商品'}」${itemId ? '(完整详情读取失败,可以之后手动重试)' : ''}`,
+    text: `已导入基本信息(标题/价格):「${quickInfo.title || itemId || '商品'}」`,
   });
 }
 

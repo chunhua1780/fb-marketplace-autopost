@@ -158,6 +158,11 @@ button.danger {
   color: #1a4fb4;
 }
 
+.status-reading_details .status {
+  background: #dbe7ff;
+  color: #1a4fb4;
+}
+
 .badge {
   display: inline-block;
   font-size: 11px;

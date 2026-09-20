@@ -243,6 +243,12 @@
     if (!isPlausibleRow(row)) return;
     if (row.dataset.fbmaQueued === '1') return; // 已经选过/处理中了,别重复加
 
+    // 只挡住浏览器的默认动作(这一行本身通常包在一个真实的 <a href="/marketplace/
+    // item/..."> 链接里,不挡的话浏览器会直接跳转过去,整个页面(连同这段脚本)
+    // 都会被换掉,后面什么都读不到),但不挡事件继续往下传——Facebook 自己的
+    // React 点击逻辑要靠事件冒泡下去才会弹出详情框,挡住了传播它就收不到这次点击。
+    e.preventDefault();
+
     row.dataset.fbmaQueued = '1';
     const quickInfo = extractQuickInfo(row);
     setRowBadge(row, '✅ 已选中', '#1877f2');
