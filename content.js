@@ -78,14 +78,26 @@
       const priceEl = findFieldByLabel(FB_LABELS.price);
       if (priceEl) setNativeValue(priceEl, String(listing.price ?? ''));
 
+      // 类别/成色是下拉选择,要求新表单里的选项文字跟旧商品读到的完全一致才能
+      // 选中——版本、语言、Facebook 改过选项措辞都可能对不上。这两个字段选不中
+      // 只是让用户自己补选一下(几秒钟的事),不应该因为这个把标题/价格/描述/
+      // 图片这些已经填好的内容也一起作废、整个重新上架直接判失败。
       if (listing.category) {
         steps.push('选择类别');
-        await selectFromDropdown(FB_LABELS.category, listing.category);
+        try {
+          await selectFromDropdown(FB_LABELS.category, listing.category);
+        } catch (err) {
+          steps.push(`选择类别失败(已跳过,请手动选择「${listing.category}」): ${(err && err.message) || err}`);
+        }
       }
 
       if (listing.condition) {
         steps.push('选择成色');
-        await selectFromDropdown(FB_LABELS.condition, listing.condition);
+        try {
+          await selectFromDropdown(FB_LABELS.condition, listing.condition);
+        } catch (err) {
+          steps.push(`选择成色失败(已跳过,请手动选择「${listing.condition}」): ${(err && err.message) || err}`);
+        }
       }
 
       steps.push('填写描述');

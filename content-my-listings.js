@@ -1,14 +1,18 @@
 // content-my-listings.js - 注入到 Facebook Marketplace「我的商品/正在出售」管理页面
 //
-// 点一行商品,Facebook 会弹出一个「Your Listing」详情对话框。这里只做两件很快的
-// 事:①从这个对话框里把标题/价格/缩略图和 Facebook 的真实商品编号读出来,
-// ②把对话框关掉——不在这个页面上继续点「Edit Listing」展开完整表单、下载图片
-// 了(那一套很慢,而且之前用「程序模拟点击」去后台补一次点击来触发它,结果发现
-// 合成事件(dispatchEvent 出来的 isTrusted=false 事件)不可靠,Facebook 的 React
-// 逻辑不一定认)。改成:秒选 + 真实点击自然弹窗读基本信息,读完立刻把编号交给
-// background.js,由它在一个新的后台标签页里打开这个商品的独立页面、真正地把
-// 完整表单(类别/成色/描述/图片)读一遍——这一步用的是真实的页面导航,不依赖任何
-// 合成点击,足够可靠。
+// 之前试过让真实点击不被拦截,借 Facebook 自己弹出的「Your Listing」详情对话框
+// 去读标题/价格/编号——能读到,但这个对话框是一个真的会挡住整个页面的弹窗,
+// 从弹出到关闭这一小段时间里,用户没法点下一个商品,连续选好几个体验很差(点
+// 了第二下,其实点在还没关掉的弹窗背景上,根本没选中)。
+//
+// 后来发现完全不需要靠这个弹窗:商品管理页里,每一行本身在 Facebook 原始的
+// HTML 里就已经带着指向这个商品的真实链接(<a href="/marketplace/item/真实
+// 编号">),标题/价格也能从这一行自己的 aria-label / 文字里直接读到——不用点
+// 开任何东西。所以现在点击完全拦下来(不让 Facebook 收到这次点击,不会弹出
+// 任何东西),直接从这一行本身读完标题/价格/真实编号,立刻把编号交给
+// background.js 排队,由它在一个新的后台标签页里打开这个商品的独立页面、真正
+// 地把完整表单(类别/成色/描述/图片)读一遍——这一步用的是真实的页面导航,不
+// 依赖任何合成点击,足够可靠,也完全不挡当前这个页面,可以一个接一个连续点选。
 
 (function () {
   let selectModeActive = false;
@@ -137,94 +141,6 @@
     }, ms);
   }
 
-  // 在对话框里找「关闭」按钮:有文字/aria-label 的最好找;很多关闭按钮其实只是
-  // 一个没有文字的小图标,这种就退回按位置猜——对话框右上角那个巴掌大的按钮,
-  // 十有八九就是它。
-  function findDialogCloseButton(dialog) {
-    const byLabel =
-      dialog.querySelector('[aria-label="Close" i]') ||
-      dialog.querySelector('[aria-label*="close" i]') ||
-      findClickableByText(['Close', '关闭', '關閉'], dialog);
-    if (byLabel) return byLabel;
-
-    const dialogRect = dialog.getBoundingClientRect();
-    const candidates = Array.from(dialog.querySelectorAll('div[role="button"], span[role="button"]'))
-      .map((el) => ({ el, rect: el.getBoundingClientRect() }))
-      .filter(({ rect }) => rect.width > 4 && rect.width < 44 && rect.height > 4 && rect.height < 44)
-      .filter(({ rect }) => rect.top - dialogRect.top < 60 && dialogRect.right - rect.right < 60);
-    return candidates.length ? candidates[0].el : null;
-  }
-
-  // 关掉当前弹出的对话框,并且真的等它消失了再返回——点了关闭按钮不代表立刻
-  // 就关了,只点一下就默认成功的话,对话框其实还开着,会把下一次选商品卡住。
-  async function closeAnyOverlay() {
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const dialog = document.querySelector('[role="dialog"]');
-      if (!dialog) return true;
-
-      const closeBtn = findDialogCloseButton(dialog);
-      if (closeBtn) {
-        closeBtn.click();
-      } else {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
-      }
-      const gone = await waitFor(() => !document.querySelector('[role="dialog"]'), { timeout: 2500 });
-      if (gone) return true;
-    }
-    return !document.querySelector('[role="dialog"]');
-  }
-
-  // 点击本身不拦截(不 preventDefault/stopPropagation),让 Facebook 自己的逻辑
-  // 正常弹出详情对话框——这样就不需要之后再用程序模拟一次点击去补触发,合成事件
-  // 不可靠的问题也就不存在了。我们只是在真实点击之后,等对话框出现、把能立刻看到
-  // 的信息(标题/价格/缩略图/Facebook 商品编号)读出来、关掉对话框,然后把编号
-  // 交给后台队列去慢慢读完整表单(类别/成色/描述/图片),不在这个页面上等那么久。
-  async function processRowClick(row, quickInfo) {
-    if (!row.isConnected) return;
-    setRowBadge(row, '🔎 正在打开详情...', '#1877f2');
-
-    try {
-      const dialog = await waitFor(() => document.querySelector('[role="dialog"]'), { timeout: 4000 });
-
-      if (!dialog) {
-        // 没弹出对话框——退回看这一行本身有没有现成的商品链接。有的话照样能把
-        // 编号交给后台队列去读完整详情;没有的话就只能先把秒选时看到的基本信息
-        // (标题/价格)存下来,不要什么都不存、白白浪费这次点选。
-        const itemId = extractItemId(row);
-        chrome.runtime.sendMessage({ type: 'QUEUE_DETAIL_READ', itemId, quickInfo }).catch(() => {});
-        finishRowBadge(
-          row,
-          itemId ? '📋 已排队,后台读取详情中...' : '✅ 已导入(基本信息,没弹出详情框)',
-          itemId ? '#1877f2' : '#16794d'
-        );
-        return;
-      }
-
-      const dialogInfo = extractQuickInfo(dialog);
-      const itemId = extractItemId(dialog);
-      const mergedInfo = dialogInfo.title ? dialogInfo : quickInfo;
-
-      const closed = await closeAnyOverlay();
-      if (!closed) {
-        await appendLog({
-          level: 'error',
-          text: `「${mergedInfo.title || '商品'}」的详情弹窗没能自动关掉,可能会挡住后续操作,请手动关一下。`,
-        });
-      }
-
-      chrome.runtime.sendMessage({ type: 'QUEUE_DETAIL_READ', itemId, quickInfo: mergedInfo }).catch(() => {});
-      finishRowBadge(
-        row,
-        itemId ? '📋 已排队,后台读取详情中...' : '✅ 已导入(基本信息,无 FB 编号)',
-        itemId ? '#1877f2' : '#16794d'
-      );
-    } catch (err) {
-      finishRowBadge(row, '⚠️ 出错了', '#c0362c');
-      await appendLog({ level: 'error', text: `处理「${quickInfo.title || '商品'}」时出错: ${(err && err.message) || err}` });
-      closeAnyOverlay();
-    }
-  }
-
   function handleMouseMove(e) {
     if (!selectModeActive) return;
     if (isActionButtonClick(e.target)) {
@@ -243,17 +159,21 @@
     if (!isPlausibleRow(row)) return;
     if (row.dataset.fbmaQueued === '1') return; // 已经选过/处理中了,别重复加
 
-    // 只挡住浏览器的默认动作(这一行本身通常包在一个真实的 <a href="/marketplace/
-    // item/..."> 链接里,不挡的话浏览器会直接跳转过去,整个页面(连同这段脚本)
-    // 都会被换掉,后面什么都读不到),但不挡事件继续往下传——Facebook 自己的
-    // React 点击逻辑要靠事件冒泡下去才会弹出详情框,挡住了传播它就收不到这次点击。
+    // 完全拦下这次点击(不让 Facebook 收到,不会弹出任何东西),直接从这一行
+    // 本身读标题/价格/真实商品编号——不用等、不会挡屏幕,可以一个接一个连续点。
     e.preventDefault();
+    e.stopPropagation();
 
     row.dataset.fbmaQueued = '1';
     const quickInfo = extractQuickInfo(row);
-    setRowBadge(row, '✅ 已选中', '#1877f2');
+    const itemId = extractItemId(row);
 
-    processRowClick(row, quickInfo);
+    chrome.runtime.sendMessage({ type: 'QUEUE_DETAIL_READ', itemId, quickInfo }).catch(() => {});
+    finishRowBadge(
+      row,
+      itemId ? '📋 已选中,后台读取详情中...' : '✅ 已导入(基本信息,没读到 FB 编号)',
+      itemId ? '#1877f2' : '#16794d'
+    );
   }
 
   function activateSelectMode() {
