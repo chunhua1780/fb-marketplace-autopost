@@ -59,7 +59,11 @@
     try {
       steps.push('等待表单加载');
       const titleReady = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 20000 });
-      if (!titleReady) throw new Error('页面加载超时,没有找到标题输入框(可能未登录,或 Facebook 改版)');
+      if (!titleReady) {
+        throw new Error(
+          `页面加载超时,没有找到标题输入框(可能未登录、要先手动选一个类目、或 Facebook 改版)。诊断信息:${JSON.stringify(collectDiagnostics())}`
+        );
+      }
 
       if (listing.photos && listing.photos.length) {
         steps.push('上传照片');

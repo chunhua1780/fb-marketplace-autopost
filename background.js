@@ -140,7 +140,10 @@ async function processListing(listing) {
   const oldItemId = listing.sourceItemId || null;
   let tab;
   try {
-    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/item', active: false });
+    // 开在前台(active: true)——之前放在后台标签页,自动填表这个过程用户完全
+    // 看不到,"到底填了没有""为什么发布页面还是空的"没法当场判断。开在前台就
+    // 能亲眼看到表单有没有被自动填上。
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/item', active: true });
     await waitForContentReady(tab.id);
 
     const result = await chrome.tabs.sendMessage(tab.id, { type: 'FILL_LISTING', listing, settings });
