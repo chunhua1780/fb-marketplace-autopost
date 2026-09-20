@@ -220,16 +220,20 @@ async function renderList() {
     els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「开始点选商品」导入,或者手动新增一个</li>';
     return;
   }
-  listings.forEach((l) => {
+  listings.forEach((l, i) => {
     const li = document.createElement('li');
     li.className = 'listing-item status-' + l.status;
     li.innerHTML = `
       <div class="listing-main">
-        <strong>${escapeHtml(l.title)}</strong>
+        <strong>#${i + 1} ${escapeHtml(l.title)}</strong>
         <span class="price">${escapeHtml(l.price || '')}</span>
         <span class="status">${STATUS_LABEL[l.status] || l.status}</span>
       </div>
-      ${l.sourceItemId ? '<div class="badge">📥 已关联 Facebook 上的商品</div>' : ''}
+      ${
+        l.sourceItemId
+          ? `<div class="badge">📥 已关联 Facebook 真实商品(编号 ...${escapeHtml(l.sourceItemId.slice(-6))})</div>`
+          : ''
+      }
       ${l.repostEnabled ? `<div class="badge">🔁 每 ${l.repostIntervalDays || 7} 天自动重新上架</div>` : ''}
       ${l.deleteOldOnRepost ? '<div class="badge">⚠️ 重新上架会自动删旧版本</div>' : ''}
       ${l.lastError ? `<div class="error">${escapeHtml(l.lastError)}</div>` : ''}
