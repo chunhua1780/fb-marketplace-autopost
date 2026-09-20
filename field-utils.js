@@ -8,8 +8,8 @@
 // 的 matches 范围会互相重叠(比如商品管理页的广泛匹配会盖到发布页/单品页),
 // 同一个页面上 field-utils.js 可能被注入不止一次——顶层 const 被执行第二次会直接
 // 报 "already been declared" 让整个内容脚本崩掉。用这种写法即使被注入多次也没事。
-if (typeof window.FB_LABELS === 'undefined') {
-  window.FB_LABELS = {
+if (typeof globalThis.FB_LABELS === 'undefined') {
+  globalThis.FB_LABELS = {
     title: ['Title', '标题', '標題'],
     price: ['Price', '价格', '價格'],
     description: ['Description', '描述'],
@@ -143,6 +143,60 @@ function findScrollableAncestor(el) {
     hops += 1;
   }
   return null;
+}
+
+// 确保编辑表单当前已经展开、标题输入框已经出现。有的情况下打开的不是直接可
+// 编辑的表单(比如详情弹窗要再点一下「Edit Listing」才会展开成表单),这个函数
+// 会自动尝试点一下再等一次。content-item.js 和 content-my-listings.js 共用。
+async function ensureEditFormVisible() {
+  let ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 8000 });
+  if (ready) return true;
+
+  const editBtn = await waitFor(() => findClickableByText(FB_LABELS.editListing), { timeout: 6000 });
+  if (editBtn) {
+    editBtn.click();
+    await fbSleep(1200);
+    ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 15000 });
+  }
+  return !!ready;
+}
+
+// 读取「当前页面上正在显示的」商品编辑表单字段 + 图片。不管这个表单是整页的
+// 编辑页,还是弹窗里临时展开的编辑区,只要标题输入框已经出现在页面上,这个
+// 函数都能用——content-item.js(整页编辑)和 content-my-listings.js(弹窗内
+// 编辑)共用同一套逻辑,不用各写一份。
+async function scrapeVisibleListingForm() {
+  const titleEl = findFieldByLabel(FB_LABELS.title);
+  const priceEl = findFieldByLabel(FB_LABELS.price);
+  const descEl = findFieldByLabel(FB_LABELS.description);
+  const categoryEl = findFieldByLabel(FB_LABELS.category);
+  const conditionEl = findFieldByLabel(FB_LABELS.condition);
+  const locationEl = findFieldByLabel(FB_LABELS.location);
+
+  const photos = [];
+  const imgs = Array.from(document.querySelectorAll('img'))
+    .filter((img) => img.naturalWidth > 80 && img.naturalHeight > 80 && /^https?:/.test(img.src))
+    .slice(0, 20);
+  for (const img of imgs) {
+    try {
+      const res = await fetch(img.src);
+      const blob = await res.blob();
+      const dataUrl = await blobToDataUrl(blob);
+      photos.push({ name: 'photo.jpg', dataUrl });
+    } catch (err) {
+      // 单张图片下载失败不影响其他字段,跳过即可
+    }
+  }
+
+  return {
+    title: readCurrentValue(titleEl),
+    price: readCurrentValue(priceEl),
+    description: readCurrentValue(descEl),
+    category: readCurrentValue(categoryEl),
+    condition: readCurrentValue(conditionEl),
+    location: readCurrentValue(locationEl),
+    photos,
+  };
 }
 
 // 出问题时收集一点页面结构信息(不含用户输入的具体商品内容),方便反馈给开发者

@@ -16,26 +16,17 @@
     <p class="hint">
       先在浏览器里打开你自己 Facebook 的「Marketplace → 我的商品/正在出售」页面,
       保持它是你当前正在看的这个标签页。点「开始点选商品」后回到那个页面,把
-      鼠标移到你自己的商品上会出现蓝色高亮框,点一下就选中(会跳出绿色"已选中"
-      提示);可以一直点选多个,这个面板可以关掉没关系,选完了再打开点
-      「结束选择」查看清单。
+      鼠标移到你自己的商品上会出现蓝色高亮框,点一下,Facebook 会弹出商品详情——
+      插件会自动读取完整信息(标题/价格/类别/成色/描述/图片)、自动关掉弹窗,
+      商品会直接出现在下面的「商品队列」里,可以接着点下一个。这个面板可以关掉
+      没关系,点选状态会保留,重开面板会自动恢复。
     </p>
     <div id="import-status" class="hint"></div>
     <div class="row">
       <button id="start-select-btn">开始点选商品</button>
-      <button id="stop-select-btn" class="secondary" hidden>结束选择</button>
+      <button id="stop-select-btn" class="secondary" hidden>停止点选</button>
     </div>
     <div id="select-progress" class="hint"></div>
-    <div id="scan-results" hidden>
-      <div class="row">
-        <button id="select-all-btn" class="secondary">全选</button>
-        <button id="select-none-btn" class="secondary">全不选</button>
-        <button id="clear-selection-btn" class="secondary danger">清空重选</button>
-      </div>
-      <ul id="scan-list"></ul>
-      <button id="import-selected-btn">导入选中的商品</button>
-      <div id="import-progress" class="hint"></div>
-    </div>
   </section>
 
   <section id="form-section">

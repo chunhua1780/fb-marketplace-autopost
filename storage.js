@@ -1,55 +1,65 @@
 // storage.js - 公共的本地存储读写方法(popup.js / background.js / content 脚本都会用到)
+//
+// 用 globalThis.X 而不是顶层 const 来定义这两个默认值,是因为这个文件现在会被
+// 好几个 content_scripts 范围互相重叠的入口一起加载,同一个页面上可能被注入
+// 不止一次——顶层 const 被执行第二次会直接报 "already been declared" 让整个
+// 内容脚本崩掉。background.js 是通过 importScripts 加载的 service worker,没有
+// window,所以这里必须用到处都有的 globalThis,不能用 window。
 
-const DEFAULT_SETTINGS = {
-  // 发布队列节奏
-  minDelaySeconds: 60,
-  maxDelaySeconds: 150,
-  // false = 只自动填表,停在发布前一步,由你本人手动点击「发布」确认(默认更安全)
-  autoPublish: false,
+if (typeof globalThis.DEFAULT_SETTINGS === 'undefined') {
+  globalThis.DEFAULT_SETTINGS = {
+    // 发布队列节奏
+    minDelaySeconds: 60,
+    maxDelaySeconds: 150,
+    // false = 只自动填表,停在发布前一步,由你本人手动点击「发布」确认(默认更安全)
+    autoPublish: false,
 
-  // 重新上架时是否允许自动删除 Facebook 上的旧商品——这是全局总开关,
-  // 默认关闭;要真正生效还需要在每条商品自己的设置里也打开 deleteOldOnRepost
-  autoDeleteOldListings: false,
+    // 重新上架时是否允许自动删除 Facebook 上的旧商品——这是全局总开关,
+    // 默认关闭;要真正生效还需要在每条商品自己的设置里也打开 deleteOldOnRepost
+    autoDeleteOldListings: false,
 
-  // 商家信息(用于自动回复里告知买家地址/购买方式)
-  sellerAddress: '',
-  purchaseMethods: '',
+    // 商家信息(用于自动回复里告知买家地址/购买方式)
+    sellerAddress: '',
+    purchaseMethods: '',
 
-  // 自动回复(询盘机器人)
-  autoReplyEnabled: false,
-  // 试运行:只把「会怎么回复」写进日志,不真的发送消息。强烈建议先用试运行验证选择器有效
-  autoReplyDryRun: true,
-  maxAutoRepliesPerDay: 40,
-  perThreadCooldownSeconds: 20,
+    // 自动回复(询盘机器人)
+    autoReplyEnabled: false,
+    // 试运行:只把「会怎么回复」写进日志,不真的发送消息。强烈建议先用试运行验证选择器有效
+    autoReplyDryRun: true,
+    maxAutoRepliesPerDay: 40,
+    perThreadCooldownSeconds: 20,
 
-  // 可选的 AI 智能回复(需要用户自己的 Anthropic API Key,规则库没匹配到时才会用到)
-  aiModeEnabled: false,
-  aiApiKey: '',
-  aiModel: 'claude-haiku-4-5',
-};
+    // 可选的 AI 智能回复(需要用户自己的 Anthropic API Key,规则库没匹配到时才会用到)
+    aiModeEnabled: false,
+    aiApiKey: '',
+    aiModel: 'claude-haiku-4-5',
+  };
+}
 
-const DEFAULT_FAQS = [
-  {
-    keywords: '还在,还有,available,still have,still available',
-    answer: '在的~「{{title}}」还没卖出,价格是 {{price}},随时可以约时间来看货!',
-  },
-  {
-    keywords: '最低,能便宜,可以少,划价,底价,lowest,best price,discount',
-    answer: '目前的价格是 {{price}},已经是比较实在的价格了,如果诚心要可以再聊聊~',
-  },
-  {
-    keywords: '地址,哪里取,在哪,location,where,pick up,pickup',
-    answer: '方便取货的地点是:{{address}}。可以提前约好时间过来拿哦!',
-  },
-  {
-    keywords: '怎么买,如何购买,付款,支付,how to buy,payment,how do i pay',
-    answer: '购买/付款方式:{{purchase}}。确定要的话可以直接约时间见面交易~',
-  },
-  {
-    keywords: '成色,新旧,used,condition,新的吗',
-    answer: '成色是:{{condition}}。{{description}}',
-  },
-];
+if (typeof globalThis.DEFAULT_FAQS === 'undefined') {
+  globalThis.DEFAULT_FAQS = [
+    {
+      keywords: '还在,还有,available,still have,still available',
+      answer: '在的~「{{title}}」还没卖出,价格是 {{price}},随时可以约时间来看货!',
+    },
+    {
+      keywords: '最低,能便宜,可以少,划价,底价,lowest,best price,discount',
+      answer: '目前的价格是 {{price}},已经是比较实在的价格了,如果诚心要可以再聊聊~',
+    },
+    {
+      keywords: '地址,哪里取,在哪,location,where,pick up,pickup',
+      answer: '方便取货的地点是:{{address}}。可以提前约好时间过来拿哦!',
+    },
+    {
+      keywords: '怎么买,如何购买,付款,支付,how to buy,payment,how do i pay',
+      answer: '购买/付款方式:{{purchase}}。确定要的话可以直接约时间见面交易~',
+    },
+    {
+      keywords: '成色,新旧,used,condition,新的吗',
+      answer: '成色是:{{condition}}。{{description}}',
+    },
+  ];
+}
 
 function genId() {
   return 'l_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);

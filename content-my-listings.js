@@ -1,18 +1,18 @@
 // content-my-listings.js - 注入到 Facebook Marketplace「我的商品/正在出售」管理页面
 //
-// 之前的做法是靠代码去猜页面上哪些元素是"商品卡片",反复验证下来这种纯靠猜的
-// 方式对不同账号/版本的页面结构太不可靠。现在换成「点选式导入」:打开选择模式
-// 后,把鼠标移到你自己的商品上会高亮,点一下就选中——是你在指认"这是我的商品",
-// 不是代码在瞎猜。
+// 根据真实截图确认:在这个页面点一行商品,Facebook 会弹出一个「Your Listing」
+// 详情对话框(不是跳转到新页面),对话框里有 Edit Listing / Delete listing 这些
+// 按钮。之前的版本想拦截这次点击、自己去拼网址,结果对话框还是弹出来了,把整个
+// 页面挡住,用户点不了别的,插件却毫无反应,体验很差。
 //
-// 大多数情况下能直接从被点的这一行里找到指向商品详情页的链接,当场就能拿到
-// 商品 id,不需要跳转。极少数情况下如果这一行里确实没有能识别出 id 的链接,
-// 就让这次点击正常发生(不拦截),Facebook 自己知道怎么跳到对应商品页——等页面
-// 跳过去之后,由 content-item.js 从当时的网址里读出真正的 id,和刚才记下来的
-// 标题/价格/缩略图拼在一起,再自动跳回列表页,不用你自己点后退。
+// 现在换个思路:不再拦截点击,直接顺着 Facebook 弹出的这个对话框走——从对话框
+// 里读基本信息,点它自带的「Edit Listing」展开完整表单,把标题/价格/类别/成色/
+// 描述/图片一次性读完,然后自动把对话框关掉,页面回到列表、可以继续点下一个。
+// 一次点击就能拿到完整信息,不再需要「先选,最后再统一导入」这种两阶段流程。
 
 (function () {
   let selectModeActive = false;
+  let processing = false; // 防止上一个还没处理完,又点了下一个导致相互干扰
 
   function isActionButtonClick(target) {
     const btn = target.closest('div[role="button"], button, a[role="button"]');
@@ -46,23 +46,25 @@
   // 顺序解析,这一句如果存在,通常比自己拼行内文字更准。
   const ARIA_RE = /^(?<title>.*?),\s*(?<price>[^,]*\d[^,]*),/;
 
-  function extractFromRow(row) {
-    const link = row.querySelector('a[href*="/marketplace/item/"]');
-    const ariaLabel = (link && link.getAttribute('aria-label')) || row.getAttribute('aria-label') || '';
+  function extractQuickInfo(el) {
+    const link = el.querySelector ? el.querySelector('a[href*="/marketplace/item/"]') : null;
+    const ariaLabel = (link && link.getAttribute('aria-label')) || (el.getAttribute && el.getAttribute('aria-label')) || '';
     const ariaMatch = ariaLabel.match(ARIA_RE);
 
-    const text = (row.innerText || row.textContent || '').trim();
-    const img = row.querySelector('img');
+    const text = (el.innerText || el.textContent || '').trim();
+    const img = el.querySelector ? el.querySelector('img') : null;
     const priceMatch = text.match(PRICE_RE);
 
     let title = ariaMatch && ariaMatch.groups.title.trim();
     if (!title) {
-      // 退回按行取第一行;如果第一行看起来不像标题(太短、或者就是价格本身),
-      // 改成取这一行里所有 <span> 文字里最长的那一段(价格/地点通常比标题短)。
+      const heading = el.querySelector && el.querySelector('h1, h2, [role="heading"]');
+      if (heading) title = heading.textContent.trim();
+    }
+    if (!title) {
       const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
       title = lines[0] || '';
       if (!title || (priceMatch && title === priceMatch[0])) {
-        const spanTexts = Array.from(row.querySelectorAll('span'))
+        const spanTexts = Array.from(el.querySelectorAll('span'))
           .map((s) => s.textContent.trim())
           .filter((t) => t && !(priceMatch && t.includes(priceMatch[0])));
         if (spanTexts.length) title = spanTexts.reduce((a, b) => (b.length > a.length ? b : a), '');
@@ -70,7 +72,6 @@
     }
 
     const priceText = (ariaMatch && ariaMatch.groups.price.trim()) || (priceMatch ? priceMatch[0] : '');
-
     return { title, priceText, thumbUrl: img ? img.src : '' };
   }
 
@@ -97,21 +98,131 @@
     row.dataset.fbmaHighlighted = '1';
   }
 
-  function flashConfirm(row) {
+  function showBadge(row, text, color) {
     const badge = document.createElement('div');
-    badge.textContent = '✅ 已选中';
+    badge.textContent = text;
     badge.style.cssText =
-      'position:absolute;background:#16794d;color:#fff;padding:2px 10px;border-radius:10px;' +
-      'font-size:12px;z-index:2147483647;pointer-events:none;font-family:sans-serif;';
+      `position:absolute;background:${color};color:#fff;padding:2px 10px;border-radius:10px;` +
+      'font-size:12px;z-index:2147483647;pointer-events:none;font-family:sans-serif;transition:opacity .3s;';
     const rect = row.getBoundingClientRect();
     badge.style.left = rect.left + window.scrollX + 8 + 'px';
     badge.style.top = rect.top + window.scrollY + 8 + 'px';
     document.body.appendChild(badge);
-    setTimeout(() => badge.remove(), 1300);
+    return badge;
+  }
+
+  function closeAnyOverlay() {
+    const dialog = document.querySelector('[role="dialog"]');
+    if (dialog) {
+      const closeBtn =
+        dialog.querySelector('[aria-label="Close" i]') || findClickableByText(['Close', '关闭', '關閉'], dialog);
+      if (closeBtn) {
+        closeBtn.click();
+        return;
+      }
+    }
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+  }
+
+  async function saveImportedListing(itemId, data) {
+    const listings = await getListings();
+    if (!listings.some((l) => l.sourceItemId === itemId)) {
+      listings.push(
+        genListing({
+          title: data.title || '',
+          price: data.price || data.priceText || '',
+          category: data.category || '',
+          condition: data.condition || '',
+          description: data.description || '',
+          location: data.location || '',
+          photos: data.photos || [],
+          sourceItemId: itemId,
+          sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/`,
+          status: 'imported',
+          importedAt: Date.now(),
+        })
+      );
+      await saveListings(listings);
+    }
+    await appendLog({ level: 'success', text: `已导入:「${data.title || itemId}」` });
+  }
+
+  // 点一行商品之后:顺着 Facebook 自己弹出的详情对话框走——读基本信息,点它的
+  // 「Edit Listing」展开完整表单读全部字段,再把对话框关掉。对话框没弹出来的
+  // 极少数情况,退回旧办法:能直接从这一行拿到商品链接就直接存,拿不到就记下
+  // 「回来的网址」放行这次点击,让 Facebook 自己决定怎么跳,content-item.js 落地
+  // 后会接着处理。
+  async function captureFromClick(row) {
+    const rowInfo = extractQuickInfo(row);
+    const badge = showBadge(row, '⏳ 正在读取...', '#1877f2');
+
+    try {
+      const dialog = await waitFor(() => document.querySelector('[role="dialog"]'), { timeout: 4000 });
+
+      if (!dialog) {
+        const link = row.querySelector('a[href*="/marketplace/item/"]');
+        const m = link && (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
+        if (m) {
+          await saveImportedListing(m[1], rowInfo);
+          badge.textContent = '✅ 已导入';
+          badge.style.background = '#16794d';
+        } else {
+          chrome.storage.local.set({ pendingClickCapture: { ...rowInfo, returnUrl: location.href } });
+          badge.textContent = '↪️ 正在跳转确认...';
+        }
+        setTimeout(() => badge.remove(), 1500);
+        return;
+      }
+
+      const dialogInfo = extractQuickInfo(dialog);
+      const dialogLink = dialog.querySelector('a[href*="/marketplace/item/"]');
+      let itemId = null;
+      const dm = dialogLink && (dialogLink.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
+      if (dm) itemId = dm[1];
+
+      const editBtn = findClickableByText(FB_LABELS.editListing, dialog);
+      let full = null;
+      if (editBtn) {
+        editBtn.click();
+        await fbSleep(1000);
+        const ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 8000 });
+        if (ready) {
+          full = await scrapeVisibleListingForm();
+          if (!itemId) {
+            const urlMatch = location.href.match(/\/marketplace\/item\/(\d+)/);
+            if (urlMatch) itemId = urlMatch[1];
+          }
+        }
+      }
+
+      closeAnyOverlay();
+      await fbSleep(400);
+
+      const data = full || dialogInfo || rowInfo;
+      if (!itemId) {
+        badge.textContent = '⚠️ 没识别到商品编号';
+        badge.style.background = '#c0362c';
+        await appendLog({
+          level: 'error',
+          text: `「${data.title || '商品'}」没能确认到商品编号,已跳过,请手动处理。`,
+        });
+      } else {
+        await saveImportedListing(itemId, data);
+        badge.textContent = '✅ 已导入';
+        badge.style.background = '#16794d';
+      }
+      setTimeout(() => badge.remove(), 1500);
+    } catch (err) {
+      badge.textContent = '⚠️ 出错了';
+      badge.style.background = '#c0362c';
+      setTimeout(() => badge.remove(), 1500);
+      await appendLog({ level: 'error', text: `导入「${rowInfo.title || '商品'}」时出错: ${(err && err.message) || err}` });
+      closeAnyOverlay();
+    }
   }
 
   function handleMouseMove(e) {
-    if (!selectModeActive) return;
+    if (!selectModeActive || processing) return;
     if (isActionButtonClick(e.target)) {
       clearHighlight();
       return;
@@ -120,36 +231,19 @@
     if (isPlausibleRow(row)) highlightRow(row);
   }
 
-  function handleClick(e) {
-    if (!selectModeActive) return;
+  async function handleClick(e) {
+    if (!selectModeActive || processing) return;
     if (isActionButtonClick(e.target)) return; // 让「标记为已售出」之类的正常按钮照常工作
 
     const row = findRowBoundary(e.target);
     if (!isPlausibleRow(row)) return;
 
-    const link = row.querySelector('a[href*="/marketplace/item/"]');
-    const m = link && (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
-    const info = extractFromRow(row);
-
-    if (m) {
-      // 这一行里直接就能拿到商品 id,不用跳转
-      e.preventDefault();
-      e.stopPropagation();
-      const itemId = m[1];
-      chrome.runtime.sendMessage({
-        type: 'PRODUCT_SELECTED',
-        item: { itemId, ...info, sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/` },
-      });
-      flashConfirm(row);
-      return;
+    processing = true;
+    try {
+      await captureFromClick(row);
+    } finally {
+      processing = false;
     }
-
-    // 这一行里没找到能识别的链接:记下已经提取到的信息和「回来的网址」,
-    // 然后不拦截,让这次点击照常发生——去到商品详情页之后,content-item.js
-    // 会从那个页面的真实网址里读出 id,把信息拼起来,再自动跳回这个页面。
-    chrome.storage.local.set({
-      pendingClickCapture: { ...info, returnUrl: location.href },
-    });
   }
 
   function activateSelectMode() {
@@ -165,7 +259,7 @@
     document.removeEventListener('click', handleClick, true);
   }
 
-  // 如果用户点了某个商品、跳转到详情页又自动跳回来了,选择模式应该继续开着,
+  // 如果用户点了某个商品、页面因为跳转又自动跳回来了,选择模式应该继续开着,
   // 不用每次都重新点「开始点选」——所以状态存在 storage 里,每次脚本加载时读一下。
   chrome.storage.local.get('selectModeActive').then(({ selectModeActive: active }) => {
     if (active) activateSelectMode();

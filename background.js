@@ -1,13 +1,15 @@
-// background.js - 队列调度 + 导入现有商品 + AI 回复代理(service worker)
+// background.js - 发布队列调度 + 到期自动重新上架 + AI 回复代理(service worker)
 // 说明:MV3 的 service worker 在空闲约 30 秒后会被 Chrome 回收,普通的
-// `await sleep(...)` 在等待发布间隔的几十/上百秒里大概率会被中断。
-// 所以两次发布之间的等待、导入下一件商品的等待、以及自动续期检查,都用
-// chrome.alarms 实现——闹钟到点会重新唤醒 worker,而不是让 worker 自己挂着计时。
+// `await sleep(...)` 在等待发布间隔的几十/上百秒里大概率会被中断,所以两次发布
+// 之间的等待、以及自动续期检查,都用 chrome.alarms 实现——闹钟到点会重新唤醒
+// worker,而不是让 worker 自己挂着计时。
+//
+// 「点选式导入」现有商品不经过这里:content-my-listings.js / content-item.js
+// 直接读 storage.js 提供的方法把商品写进 chrome.storage,不需要背景脚本转手。
 
 importScripts('storage.js');
 
 const ALARM_QUEUE_TICK = 'fb-marketplace-queue-tick';
-const ALARM_IMPORT_TICK = 'fb-marketplace-import-tick';
 const ALARM_REPOST_CHECK = 'fb-marketplace-repost-check';
 const pendingReadyResolvers = new Map();
 
@@ -29,7 +31,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_QUEUE_TICK) tick();
-  if (alarm.name === ALARM_IMPORT_TICK) importTick();
   if (alarm.name === ALARM_REPOST_CHECK) checkReposts();
 });
 
@@ -50,19 +51,6 @@ async function handleMessage(message, sender) {
 
     case 'REPOST_NOW':
       return repostNow(message.id);
-
-    case 'IMPORT_SELECTED':
-      startImportSelected(message.items).catch((err) =>
-        appendLog({ level: 'error', text: '导入失败: ' + ((err && err.message) || err) })
-      );
-      return { ok: true };
-
-    case 'PRODUCT_SELECTED':
-      return handleProductSelected(message.item, message.returnUrl, sender);
-
-    case 'CLEAR_SELECTED_PRODUCTS':
-      await chrome.storage.local.set({ selectedProducts: [] });
-      return { ok: true };
 
     case 'CONTENT_READY': {
       const tabId = sender.tab && sender.tab.id;
@@ -242,100 +230,6 @@ async function checkReposts() {
       tick();
     }
   }
-}
-
-// ---------- 点选式导入:接收在页面上被点中的商品 ----------
-
-async function handleProductSelected(item, returnUrl, sender) {
-  if (!item || !item.itemId) return { ok: false, error: '缺少商品 id' };
-
-  const { selectedProducts = [] } = await chrome.storage.local.get('selectedProducts');
-  if (!selectedProducts.some((p) => p.itemId === item.itemId)) {
-    selectedProducts.push(item);
-    await chrome.storage.local.set({ selectedProducts });
-    await appendLog({
-      level: 'success',
-      text: `已选中:「${item.title || item.itemId}」(目前共选了 ${selectedProducts.length} 件)`,
-    });
-  }
-
-  // returnUrl 只有「点选时这一行没有直接找到链接、被迫跳转到商品详情页」这条
-  // 路径才会带上——这种情况下要自动跳回原来的列表页,让用户可以接着点下一个。
-  if (returnUrl && sender.tab) {
-    chrome.tabs.update(sender.tab.id, { url: returnUrl }).catch(() => {});
-  }
-  return { ok: true };
-}
-
-// ---------- 导入 Facebook 上已有的商品 ----------
-// 扫描这一步现在由 popup.js 直接对着用户当前打开的那个 Facebook 标签页做
-// (content-my-listings.js 已经注入在那个页面里),不再由背景脚本去猜网址、
-// 另外开一个标签页——这样才不会出现「找不到/乱跳」的问题。
-// 这里只负责「把选中的商品逐个打开编辑页读取详情」这一步,并汇报进度。
-
-async function startImportSelected(items) {
-  if (!items || !items.length) return;
-  const listings = await getListings();
-  const known = new Set(listings.map((l) => l.sourceItemId).filter(Boolean));
-  const queue = items.filter((it) => !known.has(it.itemId));
-
-  if (!queue.length) {
-    await appendLog({ level: 'info', text: '选中的商品都已经导入过了,没有新的要导入' });
-    return;
-  }
-
-  await chrome.storage.local.set({ importQueue: queue, importProgress: { done: 0, total: queue.length } });
-  await appendLog({ level: 'info', text: `开始导入 ${queue.length} 件商品的详情(会依次打开每件商品的编辑页读取)...` });
-  importTick();
-}
-
-async function importTick() {
-  const { importQueue = [] } = await chrome.storage.local.get('importQueue');
-  const { importProgress = { done: 0, total: 0 } } = await chrome.storage.local.get('importProgress');
-
-  if (!importQueue.length) {
-    if (importProgress.total) {
-      await appendLog({ level: 'info', text: `导入完成,共导入 ${importProgress.done} 件商品` });
-    }
-    await chrome.storage.local.set({ importProgress: { done: 0, total: 0 } });
-    return;
-  }
-
-  const [next, ...rest] = importQueue;
-  await chrome.storage.local.set({ importQueue: rest });
-
-  let tab;
-  try {
-    tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${next.itemId}/edit`, active: false });
-    await waitForContentReady(tab.id, 20000);
-    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
-    if (!res || !res.ok) throw new Error((res && res.error) || '读取商品详情失败');
-
-    const listings = await getListings();
-    if (!listings.some((l) => l.sourceItemId === next.itemId)) {
-      listings.push(
-        genListing({
-          ...res.listing,
-          sourceItemId: next.itemId,
-          sourceUrl: next.sourceUrl,
-          status: 'imported',
-          importedAt: Date.now(),
-        })
-      );
-      await saveListings(listings);
-    }
-    await appendLog({ level: 'success', text: `已导入:「${res.listing.title || next.title}」` });
-  } catch (err) {
-    await appendLog({ level: 'error', text: `导入「${next.title}」失败: ${(err && err.message) || err}` });
-  } finally {
-    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
-  }
-
-  await chrome.storage.local.set({
-    importProgress: { done: importProgress.total - rest.length, total: importProgress.total },
-  });
-
-  chrome.alarms.create(ALARM_IMPORT_TICK, { delayInMinutes: (5 + Math.random() * 5) / 60 });
 }
 
 // ---------- AI 智能回复 ----------

@@ -1,72 +1,16 @@
 // content-item.js - 注入到 Facebook Marketplace 单个商品页面,两个用途:
 //
-// 1) SCRAPE_ITEM:读取现有表单内容 + 下载图片,用于「导入我的商品」——把
-//    Facebook 上已有的 listing 读进插件里。
-// 2) DELETE_ITEM:在商品页执行删除操作。这一步是不可撤销的,background.js
-//    只有在用户对某条商品**同时**打开了全局开关和单条开关(deleteOldOnRepost +
-//    autoDeleteOldListings)时才会发这个指令,并且只在新的商品已经确认发布成功
-//    之后才会执行,顺序上不会出现「删了旧的却没发出新的」的情况。
+// 1) 「点选式导入」在极少数情况下的兜底路径——商品管理页点一行商品时,大多数
+//    情况 Facebook 会弹出详情对话框(那种情况由 content-my-listings.js 直接
+//    处理,不会用到这个文件);如果那次点击是真的跳转过来的,这里落地后自动
+//    把完整信息读出来存好,再自动跳回原来的列表页,不用手动点后退。
+// 2) DELETE_ITEM:重新上架成功后,可选自动删除 Facebook 上的旧版本。这一步是
+//    不可撤销的,background.js 只有在用户对某条商品**同时**打开了全局开关和
+//    单条开关(deleteOldOnRepost + autoDeleteOldListings)时才会发这个指令,
+//    并且只在新的商品已经确认发布成功之后才会执行,顺序上不会出现「删了旧的
+//    却没发出新的」的情况。
 
 (function () {
-  function isLikelyPhotoPreview(img) {
-    return img.naturalWidth > 80 && img.naturalHeight > 80 && /^https?:/.test(img.src);
-  }
-
-  // 打开的网址不一定直接就是可编辑的表单(有的账号/版本需要先点一下「编辑」才会
-  // 展开表单),这里先等标题输入框出现;等不到就找「编辑」按钮点一下再等一次。
-  async function ensureEditFormVisible() {
-    let ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 8000 });
-    if (ready) return true;
-
-    const editBtn = await waitFor(() => findClickableByText(FB_LABELS.editListing), { timeout: 6000 });
-    if (editBtn) {
-      editBtn.click();
-      await fbSleep(1200);
-      ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 15000 });
-    }
-    return !!ready;
-  }
-
-  async function scrapeCurrentForm() {
-    const ready = await ensureEditFormVisible();
-    if (!ready) {
-      const diag = collectDiagnostics();
-      throw new Error(
-        `没有找到标题输入框,读取失败(可能不是编辑表单页,或 Facebook 改版)。诊断信息:${JSON.stringify(diag)}`
-      );
-    }
-
-    const titleEl = findFieldByLabel(FB_LABELS.title);
-    const priceEl = findFieldByLabel(FB_LABELS.price);
-    const descEl = findFieldByLabel(FB_LABELS.description);
-    const categoryEl = findFieldByLabel(FB_LABELS.category);
-    const conditionEl = findFieldByLabel(FB_LABELS.condition);
-    const locationEl = findFieldByLabel(FB_LABELS.location);
-
-    const photos = [];
-    const imgs = Array.from(document.querySelectorAll('img')).filter(isLikelyPhotoPreview).slice(0, 20);
-    for (const img of imgs) {
-      try {
-        const res = await fetch(img.src);
-        const blob = await res.blob();
-        const dataUrl = await blobToDataUrl(blob);
-        photos.push({ name: 'photo.jpg', dataUrl });
-      } catch (err) {
-        // 单张图片下载失败不影响其他字段,跳过即可
-      }
-    }
-
-    return {
-      title: readCurrentValue(titleEl),
-      price: readCurrentValue(priceEl),
-      description: readCurrentValue(descEl),
-      category: readCurrentValue(categoryEl),
-      condition: readCurrentValue(conditionEl),
-      location: readCurrentValue(locationEl),
-      photos,
-    };
-  }
-
   async function deleteListingOnPage() {
     const menuBtn = await waitFor(() => findClickableByText(['More', '更多选项', '更多']), { timeout: 8000 });
     if (menuBtn) {
@@ -95,11 +39,12 @@
     return { ok: true };
   }
 
-  // 「点选式导入」的兜底路径:如果在商品列表页点选的那一行里没能直接找到商品
-  // 链接,content-my-listings.js 会把当时抓到的标题/价格/缩略图先存进
-  // pendingClickCapture,再放行那次点击、让 Facebook 自己跳过来。这里落地后
-  // 检查有没有这个待处理的记录,有的话就从当前这个真实网址里读出 id,把信息
-  // 拼成一条完整记录发给 background,再自动跳回原来的列表页,不用手动点后退。
+  // 「点选式导入」的兜底路径:如果在商品列表页点选的那一行既没有弹出详情对话
+  // 框、也没能直接从行内拿到商品链接,content-my-listings.js 会把当时抓到的
+  // 标题/价格/缩略图先存进 pendingClickCapture,再放行那次点击、让 Facebook
+  // 自己决定怎么跳。这里落地后检查有没有这个待处理的记录,有的话就把完整信息
+  // (标题/价格/类别/成色/描述/图片)读出来直接存进插件,再自动跳回原来的列表
+  // 页,不用手动点后退。
   async function checkPendingClickCapture() {
     const { pendingClickCapture } = await chrome.storage.local.get('pendingClickCapture');
     if (!pendingClickCapture) return;
@@ -107,26 +52,45 @@
 
     const m = location.href.match(/\/marketplace\/item\/(\d+)/);
     if (!m) return; // 跳到的不是商品页,忽略
-
     const itemId = m[1];
     const { title, priceText, thumbUrl, returnUrl } = pendingClickCapture;
-    chrome.runtime.sendMessage({
-      type: 'PRODUCT_SELECTED',
-      item: { itemId, title, priceText, thumbUrl, sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/` },
-      returnUrl,
-    });
+
+    let full = null;
+    const ready = await ensureEditFormVisible();
+    if (ready) {
+      full = await scrapeVisibleListingForm();
+    }
+
+    const listings = await getListings();
+    if (!listings.some((l) => l.sourceItemId === itemId)) {
+      listings.push(
+        genListing({
+          title: (full && full.title) || title || '',
+          price: (full && full.price) || priceText || '',
+          category: (full && full.category) || '',
+          condition: (full && full.condition) || '',
+          description: (full && full.description) || '',
+          location: (full && full.location) || '',
+          photos: (full && full.photos) || [],
+          sourceItemId: itemId,
+          sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/`,
+          status: 'imported',
+          importedAt: Date.now(),
+        })
+      );
+      await saveListings(listings);
+    }
+    await appendLog({ level: 'success', text: `已导入:「${(full && full.title) || title || itemId}」` });
+
+    if (returnUrl) {
+      window.location.href = returnUrl;
+    }
   }
   checkPendingClickCapture();
 
   chrome.runtime.sendMessage({ type: 'CONTENT_READY' }).catch(() => {});
 
   chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'SCRAPE_ITEM') {
-      scrapeCurrentForm()
-        .then((listing) => sendResponse({ ok: true, listing }))
-        .catch((err) => sendResponse({ ok: false, error: String((err && err.message) || err) }));
-      return true;
-    }
     if (message.type === 'DELETE_ITEM') {
       deleteListingOnPage()
         .then((r) => sendResponse(r))

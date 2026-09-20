@@ -17,13 +17,6 @@ const els = {
   startSelectBtn: document.getElementById('start-select-btn'),
   stopSelectBtn: document.getElementById('stop-select-btn'),
   selectProgress: document.getElementById('select-progress'),
-  scanResults: document.getElementById('scan-results'),
-  scanList: document.getElementById('scan-list'),
-  selectAllBtn: document.getElementById('select-all-btn'),
-  selectNoneBtn: document.getElementById('select-none-btn'),
-  clearSelectionBtn: document.getElementById('clear-selection-btn'),
-  importSelectedBtn: document.getElementById('import-selected-btn'),
-  importProgress: document.getElementById('import-progress'),
 
   title: document.getElementById('f-title'),
   price: document.getElementById('f-price'),
@@ -74,7 +67,6 @@ const els = {
 };
 
 let currentPhotos = []; // { name, dataUrl }[]
-let scannedItems = []; // 「结束选择」时从 selectedProducts 里读出来、等待勾选确认导入的商品
 let scanTabId = null; // 当前 Facebook 标签页 id
 
 const STATUS_LABEL = {
@@ -277,8 +269,8 @@ async function loadSettings() {
 
 // ---------- 点选式导入 ----------
 // 不再靠代码去猜页面结构,而是让用户自己在 Facebook 页面上点要导入的商品,
-// 插件只负责在点击发生时把信息接住(见 content-my-listings.js)。这里只管
-// 面板上的开关按钮、显示已经选了多少个、以及「结束选择」后展示确认清单。
+// 插件只负责在点击发生时把信息接住(见 content-my-listings.js)。点一下就会
+// 立刻读完完整信息存进商品队列,这里只管面板上的开关按钮和进度提示。
 
 async function detectCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -303,17 +295,12 @@ async function detectCurrentTab() {
 }
 
 async function refreshSelectModeUi() {
-  const { selectModeActive, selectedProducts = [] } = await chrome.storage.local.get([
-    'selectModeActive',
-    'selectedProducts',
-  ]);
+  const { selectModeActive } = await chrome.storage.local.get('selectModeActive');
   els.startSelectBtn.hidden = !!selectModeActive;
   els.stopSelectBtn.hidden = !selectModeActive;
   els.selectProgress.textContent = selectModeActive
-    ? `点选模式已开启,目前已选中 ${selectedProducts.length} 件——回到 Facebook 页面继续点,或者点「结束选择」查看清单。`
-    : selectedProducts.length
-      ? `已经选了 ${selectedProducts.length} 件,还没确认导入。`
-      : '';
+    ? '点选模式已开启——回到 Facebook 页面,把鼠标移到你的商品上,点一下就会自动读取并导入,可以连续点多个。'
+    : '';
 }
 
 els.startSelectBtn.addEventListener('click', async () => {
@@ -333,78 +320,7 @@ els.stopSelectBtn.addEventListener('click', async () => {
     await chrome.storage.local.set({ selectModeActive: false });
   }
   await refreshSelectModeUi();
-
-  const { selectedProducts = [] } = await chrome.storage.local.get('selectedProducts');
-  scannedItems = selectedProducts;
-  if (!scannedItems.length) {
-    els.importStatus.textContent = '还没有选中任何商品。回到 Facebook 页面,把鼠标移到你的商品上点一下试试。';
-    els.scanResults.hidden = true;
-    return;
-  }
-  els.importStatus.textContent = `已选中 ${scannedItems.length} 件商品,确认下面的清单,然后点「导入选中的商品」。`;
-  renderScanList();
-  els.scanResults.hidden = false;
 });
-
-els.clearSelectionBtn.addEventListener('click', async () => {
-  if (!confirm('确定清空已经点选的商品,重新开始选吗?')) return;
-  await chrome.runtime.sendMessage({ type: 'CLEAR_SELECTED_PRODUCTS' });
-  scannedItems = [];
-  els.scanResults.hidden = true;
-  await refreshSelectModeUi();
-});
-
-function renderScanList() {
-  els.scanList.innerHTML = '';
-  scannedItems.forEach((it, idx) => {
-    const li = document.createElement('li');
-    li.className = 'scan-item';
-    li.innerHTML = `
-      <label class="scan-item-label">
-        <input type="checkbox" data-idx="${idx}" checked />
-        ${it.thumbUrl ? `<img src="${escapeHtml(it.thumbUrl)}" class="thumb" />` : ''}
-        <span class="scan-item-text">${escapeHtml(it.title)}${it.priceText ? ` · ${escapeHtml(it.priceText)}` : ''}</span>
-      </label>
-    `;
-    els.scanList.appendChild(li);
-  });
-}
-
-els.selectAllBtn.addEventListener('click', () => {
-  els.scanList.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = true));
-});
-
-els.selectNoneBtn.addEventListener('click', () => {
-  els.scanList.querySelectorAll('input[type="checkbox"]').forEach((cb) => (cb.checked = false));
-});
-
-els.importSelectedBtn.addEventListener('click', async () => {
-  const checkedIdx = Array.from(els.scanList.querySelectorAll('input[type="checkbox"]:checked')).map((cb) => Number(cb.dataset.idx));
-  const selected = checkedIdx.map((i) => scannedItems[i]);
-  if (!selected.length) {
-    alert('先勾选至少一个商品');
-    return;
-  }
-  const res = await chrome.runtime.sendMessage({ type: 'IMPORT_SELECTED', items: selected });
-  if (!res || !res.ok) {
-    alert('无法开始导入: ' + (res && res.error));
-    return;
-  }
-  await chrome.runtime.sendMessage({ type: 'CLEAR_SELECTED_PRODUCTS' });
-  scannedItems = [];
-  els.scanResults.hidden = true;
-  els.importStatus.textContent = '已开始导入,进度见下方。';
-});
-
-async function renderImportProgress() {
-  const { importProgress } = await chrome.storage.local.get('importProgress');
-  if (!importProgress || !importProgress.total) {
-    els.importProgress.textContent = '';
-    return;
-  }
-  const done = Math.min(importProgress.done, importProgress.total);
-  els.importProgress.textContent = `导入进度:${done} / ${importProgress.total}${done >= importProgress.total ? '(完成)' : ''}`;
-}
 
 els.saveSettingsBtn.addEventListener('click', async () => {
   const settings = await getSettings();
@@ -500,8 +416,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.listings) renderList();
   if (changes.runLog) renderLog();
   if (changes.faqs) renderFaqs();
-  if (changes.importProgress) renderImportProgress();
-  if (changes.selectedProducts || changes.selectModeActive) refreshSelectModeUi();
+  if (changes.selectModeActive) refreshSelectModeUi();
 });
 
 // 用这个包一层,是为了防止某一步(比如检测当前标签页)出问题时把整个初始化
@@ -528,5 +443,4 @@ function renderVersionBadge() {
   await safeRun('设置', loadSettings);
   await safeRun('日志', renderLog);
   await safeRun('常见问题话术', renderFaqs);
-  await safeRun('导入进度', renderImportProgress);
 })();
