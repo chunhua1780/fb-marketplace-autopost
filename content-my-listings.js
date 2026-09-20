@@ -1,18 +1,20 @@
 // content-my-listings.js - 注入到 Facebook Marketplace「我的商品/正在出售」管理页面
 //
-// 根据真实截图确认:在这个页面点一行商品,Facebook 会弹出一个「Your Listing」
-// 详情对话框(不是跳转到新页面),对话框里有 Edit Listing / Delete listing 这些
-// 按钮。之前的版本想拦截这次点击、自己去拼网址,结果对话框还是弹出来了,把整个
-// 页面挡住,用户点不了别的,插件却毫无反应,体验很差。
+// 点一行商品,Facebook 会弹出一个「Your Listing」详情对话框,里面有 Edit Listing
+// 按钮,点开才能读到完整的类别/成色/描述/图片——这一套「开对话框 → 点编辑 →
+// 等表单出现 → 下载图片 → 关掉对话框」做完通常要好几秒。如果每点一下就原地等
+// 这一整套跑完,连续点第二个、第三个商品时都要排队等前一个跑完,体验就是「点
+// 第一个卡半天」。
 //
-// 现在换个思路:不再拦截点击,直接顺着 Facebook 弹出的这个对话框走——从对话框
-// 里读基本信息,点它自带的「Edit Listing」展开完整表单,把标题/价格/类别/成色/
-// 描述/图片一次性读完,然后自动把对话框关掉,页面回到列表、可以继续点下一个。
-// 一次点击就能拿到完整信息,不再需要「先选,最后再统一导入」这种两阶段流程。
+// 所以拆成两半:点击本身只做「秒选」——立刻记下这一行看得到的标题/价格/缩略图,
+// 打个「已选中」的标记,不等任何东西,可以马上点下一个;真正慢的那部分(开对话
+// 框、读完整字段、下图片)扔进一个后台队列,排队慢慢跑,跑到哪个商品就把哪个
+// 商品的标记从「排队中」换成「已导入」,不会挡住继续选下一个。
 
 (function () {
   let selectModeActive = false;
-  let processing = false; // 防止上一个还没处理完,又点了下一个导致相互干扰
+  const queue = []; // { row, quickInfo }[]
+  let queueRunning = false;
 
   function isActionButtonClick(target) {
     const btn = target.closest('div[role="button"], button, a[role="button"]');
@@ -98,17 +100,38 @@
     row.dataset.fbmaHighlighted = '1';
   }
 
-  function showBadge(row, text, color) {
-    const badge = document.createElement('div');
-    badge.textContent = text;
-    badge.style.cssText =
-      `position:absolute;background:${color};color:#fff;padding:2px 10px;border-radius:10px;` +
-      'font-size:12px;z-index:2147483647;pointer-events:none;font-family:sans-serif;transition:opacity .3s;';
+  // 每一行自己的状态小标签(已选中/排队中/正在读取/已导入),跟着这一行走,
+  // 状态变化时原地更新文字和颜色,而不是每次都重新弹一个新的。
+  const rowBadges = new Map();
+
+  function setRowBadge(row, text, color) {
+    let badge = rowBadges.get(row);
+    if (!badge || !badge.isConnected) {
+      badge = document.createElement('div');
+      badge.style.cssText =
+        'position:absolute;color:#fff;padding:2px 10px;border-radius:10px;font-size:12px;' +
+        'z-index:2147483647;pointer-events:none;font-family:sans-serif;';
+      document.body.appendChild(badge);
+      rowBadges.set(row, badge);
+    }
     const rect = row.getBoundingClientRect();
     badge.style.left = rect.left + window.scrollX + 8 + 'px';
     badge.style.top = rect.top + window.scrollY + 8 + 'px';
-    document.body.appendChild(badge);
+    badge.style.background = color;
+    badge.textContent = text;
     return badge;
+  }
+
+  function finishRowBadge(row, text, color, ms = 1800) {
+    setRowBadge(row, text, color);
+    setTimeout(() => {
+      const badge = rowBadges.get(row);
+      if (badge) {
+        badge.remove();
+        rowBadges.delete(row);
+      }
+      delete row.dataset.fbmaQueued; // 处理完了,允许以后需要的话重新点选(比如失败想重试)
+    }, ms);
   }
 
   // 在对话框里找「关闭」按钮:有文字/aria-label 的最好找;很多关闭按钮其实只是
@@ -130,7 +153,7 @@
   }
 
   // 关掉当前弹出的对话框,并且真的等它消失了再返回——点了关闭按钮不代表立刻
-  // 就关了,之前只点一下就默认成功,导致对话框其实还开着、把下一次点选卡住。
+  // 就关了,只点一下就默认成功的话,对话框其实还开着,会把下一个排队的商品卡住。
   async function closeAnyOverlay() {
     for (let attempt = 0; attempt < 2; attempt++) {
       const dialog = document.querySelector('[role="dialog"]');
@@ -150,10 +173,7 @@
 
   // itemId 是 Facebook 那边的真实商品编号,只用在两个地方:导入去重、以及
   // 「重新上架后自动删除旧版本」。读不到也完全不影响导入——标题/价格/图片这些
-  // 读到了就先存下来,用插件自己的编号(genListing 里自动生成)管理,后面
-  // 「重新上架」照样能用,只是少了「自动删除 Facebook 上那条旧的」这一个可选
-  // 功能而已。之前的版本读不到 itemId 就整条数据都不存,才是「读一个丢一个」
-  // 的真正原因。
+  // 读到了就先存下来,用插件自己的编号(genListing 里自动生成)管理。
   async function saveImportedListing(itemId, data) {
     const listings = await getListings();
     if (itemId && listings.some((l) => l.sourceItemId === itemId)) {
@@ -181,27 +201,28 @@
     });
   }
 
-  // 点一行商品之后:顺着 Facebook 自己弹出的详情对话框走——读基本信息,点它的
-  // 「Edit Listing」展开完整表单读全部字段,再把对话框关掉。不管每一步能读到
-  // 多完整,最后都会存下来(存不到 Facebook 真实编号就用插件自己的编号),不会
-  // 因为某一项信息缺失就把整条数据丢掉。
-  async function captureFromClick(row) {
-    const rowInfo = extractQuickInfo(row);
-    const badge = showBadge(row, '⏳ 正在读取...', '#1877f2');
+  // 后台队列真正干活的地方:对某一行「补点一次」(用程序模拟点击,因为秒选那一下
+  // 已经被拦下来、没有真的触发 Facebook 弹窗),让 Facebook 弹出详情对话框,读
+  // 基本信息,点它自带的「Edit Listing」展开完整表单,把类别/成色/描述/图片一次
+  // 读完,再关掉对话框、存起来。
+  async function captureDetails(row, quickInfo) {
+    if (!row.isConnected) {
+      await appendLog({ level: 'error', text: `「${quickInfo.title || '商品'}」这一行已经从页面上消失了(可能是列表刷新/滚动导致),已跳过,请重新点选一次。` });
+      return;
+    }
+
+    setRowBadge(row, '⏳ 正在读取详情...', '#1877f2');
 
     try {
+      row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+
       const dialog = await waitFor(() => document.querySelector('[role="dialog"]'), { timeout: 4000 });
 
       if (!dialog) {
-        // 没弹出详情对话框(少见情况):能从这一行直接拿到商品链接就用真实编号,
-        // 拿不到就直接用插件自己的编号存——标题/价格/缩略图这些能读到多少算多少,
-        // 不再为了等一个可能压根不会发生的跳转而把这条数据一直悬着不存。
         const link = row.querySelector('a[href*="/marketplace/item/"]');
         const m = link && (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
-        await saveImportedListing(m ? m[1] : null, rowInfo);
-        badge.textContent = m ? '✅ 已导入' : '✅ 已导入(无 FB 编号)';
-        badge.style.background = '#16794d';
-        setTimeout(() => badge.remove(), 1500);
+        await saveImportedListing(m ? m[1] : null, quickInfo);
+        finishRowBadge(row, m ? '✅ 已导入' : '✅ 已导入(无 FB 编号)', '#16794d');
         return;
       }
 
@@ -221,7 +242,7 @@
         // 下面会把这份记录清掉,不会重复处理。
         await chrome.storage.local.set({
           pendingClickCapture: {
-            ...(dialogInfo.title ? dialogInfo : rowInfo),
+            ...(dialogInfo.title ? dialogInfo : quickInfo),
             returnUrl: location.href,
             capturedAt: Date.now(),
           },
@@ -242,26 +263,35 @@
 
       const closed = await closeAnyOverlay();
       if (!closed) {
-        await appendLog({ level: 'error', text: `「${dialogInfo.title || rowInfo.title || '商品'}」的详情弹窗没能自动关掉,可能会挡住后续点选,请手动关一下。` });
+        await appendLog({ level: 'error', text: `「${dialogInfo.title || quickInfo.title || '商品'}」的详情弹窗没能自动关掉,可能会挡住后续处理,请手动关一下。` });
       }
       await fbSleep(300);
 
-      const data = full || dialogInfo || rowInfo;
+      const data = full || dialogInfo || quickInfo;
       await saveImportedListing(itemId, data);
-      badge.textContent = itemId ? '✅ 已导入' : '✅ 已导入(无 FB 编号)';
-      badge.style.background = '#16794d';
-      setTimeout(() => badge.remove(), 1500);
+      finishRowBadge(row, itemId ? '✅ 已导入' : '✅ 已导入(无 FB 编号)', '#16794d');
     } catch (err) {
-      badge.textContent = '⚠️ 出错了';
-      badge.style.background = '#c0362c';
-      setTimeout(() => badge.remove(), 1500);
-      await appendLog({ level: 'error', text: `导入「${rowInfo.title || '商品'}」时出错: ${(err && err.message) || err}` });
+      finishRowBadge(row, '⚠️ 出错了', '#c0362c');
+      await appendLog({ level: 'error', text: `导入「${quickInfo.title || '商品'}」时出错: ${(err && err.message) || err}` });
       closeAnyOverlay();
     }
   }
 
+  async function runQueue() {
+    if (queueRunning) return; // 已经有一个在跑了,新加进队列的会被它接着处理
+    queueRunning = true;
+    try {
+      while (queue.length) {
+        const next = queue.shift();
+        await captureDetails(next.row, next.quickInfo);
+      }
+    } finally {
+      queueRunning = false;
+    }
+  }
+
   function handleMouseMove(e) {
-    if (!selectModeActive || processing) return;
+    if (!selectModeActive) return;
     if (isActionButtonClick(e.target)) {
       clearHighlight();
       return;
@@ -270,26 +300,26 @@
     if (isPlausibleRow(row)) highlightRow(row);
   }
 
-  async function handleClick(e) {
+  // 点击本身只做「秒选」:立刻记下这一行的基本信息、打个排队标记,不等任何东西。
+  // 拦下这次点击(不让 Facebook 弹详情框),真正需要弹窗读详情的时候,由后台
+  // 队列对这一行重新模拟点击一次。
+  function handleClick(e) {
     if (!selectModeActive) return;
     if (isActionButtonClick(e.target)) return; // 让「标记为已售出」之类的正常按钮照常工作
 
     const row = findRowBoundary(e.target);
     if (!isPlausibleRow(row)) return;
+    if (row.dataset.fbmaQueued === '1') return; // 已经选过/排过队了,别重复加
 
-    if (processing) {
-      // 上一个还没处理完——不是没反应,是让它先跑完,给个提示别让用户以为坏了
-      const waitBadge = showBadge(row, '⏳ 上一个还没处理完,请稍等...', '#8a6d00');
-      setTimeout(() => waitBadge.remove(), 1200);
-      return;
-    }
+    e.preventDefault();
+    e.stopPropagation();
 
-    processing = true;
-    try {
-      await captureFromClick(row);
-    } finally {
-      processing = false;
-    }
+    row.dataset.fbmaQueued = '1';
+    const quickInfo = extractQuickInfo(row);
+    queue.push({ row, quickInfo });
+    setRowBadge(row, `✅ 已选中(排队第 ${queue.length} 位)`, '#1877f2');
+
+    runQueue();
   }
 
   function activateSelectMode() {
@@ -307,6 +337,8 @@
 
   // 如果用户点了某个商品、页面因为跳转又自动跳回来了,选择模式应该继续开着,
   // 不用每次都重新点「开始点选」——所以状态存在 storage 里,每次脚本加载时读一下。
+  // 排队中的任务本身是页面内存里的数组,跳转会清空它,但这种情况本来就少见
+  // (大部分商品走原地弹窗,不会真的跳转)。
   chrome.storage.local.get('selectModeActive').then(({ selectModeActive: active }) => {
     if (active) activateSelectMode();
   });
