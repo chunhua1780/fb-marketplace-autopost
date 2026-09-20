@@ -50,6 +50,10 @@
     if (!pendingClickCapture) return;
     await chrome.storage.local.remove('pendingClickCapture');
 
+    // 记录超过 30 秒还没被消费,大概率是当时那次点击哪里出了岔子(比如卡在别的
+    // 页面了),不要拿一条过期的记录去匹配现在这个可能完全不相关的页面。
+    if (pendingClickCapture.capturedAt && Date.now() - pendingClickCapture.capturedAt > 30000) return;
+
     const m = location.href.match(/\/marketplace\/item\/(\d+)/);
     if (!m) return; // 跳到的不是商品页,忽略
     const itemId = m[1];

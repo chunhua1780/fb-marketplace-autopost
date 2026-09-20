@@ -111,17 +111,41 @@
     return badge;
   }
 
-  function closeAnyOverlay() {
-    const dialog = document.querySelector('[role="dialog"]');
-    if (dialog) {
-      const closeBtn =
-        dialog.querySelector('[aria-label="Close" i]') || findClickableByText(['Close', '关闭', '關閉'], dialog);
+  // 在对话框里找「关闭」按钮:有文字/aria-label 的最好找;很多关闭按钮其实只是
+  // 一个没有文字的小图标,这种就退回按位置猜——对话框右上角那个巴掌大的按钮,
+  // 十有八九就是它。
+  function findDialogCloseButton(dialog) {
+    const byLabel =
+      dialog.querySelector('[aria-label="Close" i]') ||
+      dialog.querySelector('[aria-label*="close" i]') ||
+      findClickableByText(['Close', '关闭', '關閉'], dialog);
+    if (byLabel) return byLabel;
+
+    const dialogRect = dialog.getBoundingClientRect();
+    const candidates = Array.from(dialog.querySelectorAll('div[role="button"], span[role="button"]'))
+      .map((el) => ({ el, rect: el.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.width > 4 && rect.width < 44 && rect.height > 4 && rect.height < 44)
+      .filter(({ rect }) => rect.top - dialogRect.top < 60 && dialogRect.right - rect.right < 60);
+    return candidates.length ? candidates[0].el : null;
+  }
+
+  // 关掉当前弹出的对话框,并且真的等它消失了再返回——点了关闭按钮不代表立刻
+  // 就关了,之前只点一下就默认成功,导致对话框其实还开着、把下一次点选卡住。
+  async function closeAnyOverlay() {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const dialog = document.querySelector('[role="dialog"]');
+      if (!dialog) return true;
+
+      const closeBtn = findDialogCloseButton(dialog);
       if (closeBtn) {
         closeBtn.click();
-        return;
+      } else {
+        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
       }
+      const gone = await waitFor(() => !document.querySelector('[role="dialog"]'), { timeout: 2500 });
+      if (gone) return true;
     }
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', code: 'Escape', bubbles: true, cancelable: true }));
+    return !document.querySelector('[role="dialog"]');
   }
 
   async function saveImportedListing(itemId, data) {
@@ -167,7 +191,7 @@
           badge.textContent = '✅ 已导入';
           badge.style.background = '#16794d';
         } else {
-          chrome.storage.local.set({ pendingClickCapture: { ...rowInfo, returnUrl: location.href } });
+          chrome.storage.local.set({ pendingClickCapture: { ...rowInfo, returnUrl: location.href, capturedAt: Date.now() } });
           badge.textContent = '↪️ 正在跳转确认...';
         }
         setTimeout(() => badge.remove(), 1500);
@@ -183,6 +207,19 @@
       const editBtn = findClickableByText(FB_LABELS.editListing, dialog);
       let full = null;
       if (editBtn) {
+        // 点「Edit Listing」这一下,有的账号/版本是原地展开表单,有的可能会
+        // 整页跳转到别的编辑页——跳转的话这个页面的 JS 会被直接终止,后面的代码
+        // 根本不会执行到。所以点之前先把已知信息存一份;真的跳走了,
+        // content-item.js 落地后能接手继续读完、再自动跳回来;原地展开成功的话,
+        // 下面会把这份记录清掉,不会重复处理。
+        await chrome.storage.local.set({
+          pendingClickCapture: {
+            ...(dialogInfo.title ? dialogInfo : rowInfo),
+            returnUrl: location.href,
+            capturedAt: Date.now(),
+          },
+        });
+
         editBtn.click();
         await fbSleep(1000);
         const ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 8000 });
@@ -192,11 +229,15 @@
             const urlMatch = location.href.match(/\/marketplace\/item\/(\d+)/);
             if (urlMatch) itemId = urlMatch[1];
           }
+          await chrome.storage.local.remove('pendingClickCapture'); // 原地搞定了,不需要兜底记录了
         }
       }
 
-      closeAnyOverlay();
-      await fbSleep(400);
+      const closed = await closeAnyOverlay();
+      if (!closed) {
+        await appendLog({ level: 'error', text: `「${dialogInfo.title || rowInfo.title || '商品'}」的详情弹窗没能自动关掉,可能会挡住后续点选,请手动关一下。` });
+      }
+      await fbSleep(300);
 
       const data = full || dialogInfo || rowInfo;
       if (!itemId) {
@@ -232,11 +273,18 @@
   }
 
   async function handleClick(e) {
-    if (!selectModeActive || processing) return;
+    if (!selectModeActive) return;
     if (isActionButtonClick(e.target)) return; // 让「标记为已售出」之类的正常按钮照常工作
 
     const row = findRowBoundary(e.target);
     if (!isPlausibleRow(row)) return;
+
+    if (processing) {
+      // 上一个还没处理完——不是没反应,是让它先跑完,给个提示别让用户以为坏了
+      const waitBadge = showBadge(row, '⏳ 上一个还没处理完,请稍等...', '#8a6d00');
+      setTimeout(() => waitBadge.remove(), 1200);
+      return;
+    }
 
     processing = true;
     try {

@@ -4,6 +4,8 @@
 
 body {
   width: 380px;
+  max-width: 100%;
+  box-sizing: border-box;
   margin: 0;
   padding: 12px;
   background: #f5f6f7;

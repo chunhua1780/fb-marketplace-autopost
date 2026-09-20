@@ -13,6 +13,10 @@ const ALARM_QUEUE_TICK = 'fb-marketplace-queue-tick';
 const ALARM_REPOST_CHECK = 'fb-marketplace-repost-check';
 const pendingReadyResolvers = new Map();
 
+// 点插件图标打开的是侧边栏而不是会自动关闭的小弹窗——侧边栏会一直贴在浏览器
+// 右侧,点 Facebook 页面本身不会把它关掉,方便一边点商品一边看进度。
+chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
+
 chrome.runtime.onInstalled.addListener(async () => {
   await getFaqs(); // 首次安装时写入默认 FAQ
   chrome.alarms.create(ALARM_REPOST_CHECK, { periodInMinutes: 60 });
