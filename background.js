@@ -4,14 +4,19 @@
 // 之间的等待、以及自动续期检查,都用 chrome.alarms 实现——闹钟到点会重新唤醒
 // worker,而不是让 worker 自己挂着计时。
 //
-// 「点选式导入」现有商品不经过这里:content-my-listings.js / content-item.js
-// 直接读 storage.js 提供的方法把商品写进 chrome.storage,不需要背景脚本转手。
+// 「点选式导入」现有商品:content-my-listings.js 在商品管理页上点一下只读弹窗里
+// 能立刻看到的标题/价格/编号,读完整表单(类别/成色/描述/图片)这一步比较慢,
+// 挪到这里用后台标签页处理——打开该商品的独立页面,让 content-item.js 用真实的
+// 页面导航读一遍完整详情,不依赖任何程序模拟点击(之前用合成点击在后台重新触发
+// 弹窗,发现不可靠,Facebook 的 React 逻辑不一定认 isTrusted=false 的事件)。
 
 importScripts('storage.js');
 
 const ALARM_QUEUE_TICK = 'fb-marketplace-queue-tick';
 const ALARM_REPOST_CHECK = 'fb-marketplace-repost-check';
+const ALARM_DETAIL_READ_TICK = 'fb-marketplace-detail-read-tick';
 const pendingReadyResolvers = new Map();
+let detailReadTickRunning = false;
 
 // 点插件图标打开的是侧边栏而不是会自动关闭的小弹窗——侧边栏会一直贴在浏览器
 // 右侧,点 Facebook 页面本身不会把它关掉,方便一边点商品一边看进度。
@@ -20,10 +25,12 @@ chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => 
 chrome.runtime.onInstalled.addListener(async () => {
   await getFaqs(); // 首次安装时写入默认 FAQ
   chrome.alarms.create(ALARM_REPOST_CHECK, { periodInMinutes: 60 });
+  detailReadTick(); // 万一有上次没处理完、还留在队列里的商品,接着处理
 });
 
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ALARM_REPOST_CHECK, { periodInMinutes: 60 });
+  detailReadTick();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -36,6 +43,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === ALARM_QUEUE_TICK) tick();
   if (alarm.name === ALARM_REPOST_CHECK) checkReposts();
+  if (alarm.name === ALARM_DETAIL_READ_TICK) detailReadTick();
 });
 
 async function handleMessage(message, sender) {
@@ -68,6 +76,9 @@ async function handleMessage(message, sender) {
 
     case 'GENERATE_AI_REPLY':
       return generateAiReply(message);
+
+    case 'QUEUE_DETAIL_READ':
+      return queueDetailRead(message.itemId || null, message.quickInfo || {});
 
     default:
       return { ok: false, error: '未知消息类型: ' + message.type };
@@ -204,6 +215,118 @@ async function deleteOldListing(itemId, titleForLog) {
   } finally {
     if (tab) chrome.tabs.remove(tab.id).catch(() => {});
   }
+}
+
+// ---------- 点选式导入:后台读完整详情 ----------
+
+// 商品管理页那边只读到了弹窗里能立刻看到的标题/价格,读完整表单(类别/成色/
+// 描述/图片)这一步交给这里排队处理,避免用户连续点好几个商品时互相卡住。
+async function queueDetailRead(itemId, quickInfo) {
+  if (!itemId) {
+    // 没读到 Facebook 的真实商品编号,没法再打开一个独立页面去读完整详情,
+    // 先把秒选时看到的标题/价格存下来,不要什么都不存、白白浪费这次点选。
+    await saveBasicListing(null, quickInfo);
+    return { ok: true };
+  }
+
+  const { detailReadQueue } = await chrome.storage.local.get('detailReadQueue');
+  const queue = detailReadQueue || [];
+  if (!queue.some((q) => q.itemId === itemId)) {
+    queue.push({ itemId, quickInfo, queuedAt: Date.now() });
+    await chrome.storage.local.set({ detailReadQueue: queue });
+    await appendLog({ level: 'info', text: `「${quickInfo.title || itemId}」已加入详情读取队列,稍后自动在后台读取完整信息` });
+  }
+  detailReadTick();
+  return { ok: true };
+}
+
+async function detailReadTick() {
+  if (detailReadTickRunning) return;
+  detailReadTickRunning = true;
+  try {
+    const { detailReadQueue } = await chrome.storage.local.get('detailReadQueue');
+    const queue = detailReadQueue || [];
+    if (!queue.length) return;
+
+    const next = queue[0];
+    await processDetailRead(next);
+
+    const { detailReadQueue: queueAfter } = await chrome.storage.local.get('detailReadQueue');
+    const remaining = (queueAfter || []).filter((q) => q.itemId !== next.itemId);
+    await chrome.storage.local.set({ detailReadQueue: remaining });
+
+    if (remaining.length) {
+      const waitSeconds = Math.max(30, randomInt(8, 20));
+      chrome.alarms.create(ALARM_DETAIL_READ_TICK, { delayInMinutes: waitSeconds / 60 });
+    }
+  } finally {
+    detailReadTickRunning = false;
+  }
+}
+
+async function processDetailRead(item) {
+  const { itemId, quickInfo } = item;
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${itemId}/`, active: false });
+    await waitForContentReady(tab.id, 20000);
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
+    if (!res || !res.ok) throw new Error((res && res.error) || '读取详情失败');
+    await saveScrapedListing(itemId, res.listing, quickInfo);
+  } catch (err) {
+    await appendLog({
+      level: 'error',
+      text: `读取「${quickInfo.title || itemId}」完整详情失败,已先用基本信息(标题/价格)保存,可以晚点重试: ${(err && err.message) || err}`,
+    });
+    await saveBasicListing(itemId, quickInfo);
+  } finally {
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
+// itemId 是 Facebook 那边的真实商品编号,只用在两个地方:导入去重、以及
+// 「重新上架后自动删除旧版本」。读不到也完全不影响导入——标题/价格这些读到了
+// 就先存下来,用插件自己的编号(genListing 里自动生成)管理。
+async function saveScrapedListing(itemId, scraped, quickInfo) {
+  const listings = await getListings();
+  if (itemId && listings.some((l) => l.sourceItemId === itemId)) return;
+  listings.push(
+    genListing({
+      title: scraped.title || quickInfo.title || '',
+      price: scraped.price || quickInfo.priceText || '',
+      category: scraped.category || '',
+      condition: scraped.condition || '',
+      description: scraped.description || '',
+      location: scraped.location || '',
+      photos: scraped.photos || [],
+      sourceItemId: itemId || null,
+      sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
+      status: 'imported',
+      importedAt: Date.now(),
+    })
+  );
+  await saveListings(listings);
+  await appendLog({ level: 'success', text: `已导入完整信息:「${scraped.title || quickInfo.title || itemId}」` });
+}
+
+async function saveBasicListing(itemId, quickInfo) {
+  const listings = await getListings();
+  if (itemId && listings.some((l) => l.sourceItemId === itemId)) return;
+  listings.push(
+    genListing({
+      title: quickInfo.title || '',
+      price: quickInfo.priceText || '',
+      sourceItemId: itemId || null,
+      sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
+      status: 'imported',
+      importedAt: Date.now(),
+    })
+  );
+  await saveListings(listings);
+  await appendLog({
+    level: 'success',
+    text: `已导入基本信息(标题/价格):「${quickInfo.title || itemId || '商品'}」${itemId ? '(完整详情读取失败,可以之后手动重试)' : ''}`,
+  });
 }
 
 async function setListingFields(id, fields) {
