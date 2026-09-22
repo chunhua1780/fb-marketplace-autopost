@@ -212,14 +212,34 @@ async function scrapeVisibleListingForm() {
     }
   }
 
+  const category = readCurrentValue(categoryEl);
+  const condition = readCurrentValue(conditionEl);
+
+  // 类别/成色在 Facebook 的编辑表单里经常不是普通的下拉框,而是一个「点了会
+  // 弹出一整棵分类树」的按钮,按钮上显示的文字往往就是当前选中的类别本身(比如
+  // "Electronics & Computers"),不会带着「Category」这几个字——我们靠标签文字
+  // 找字段这一套(findFieldByLabel)就完全找不到它,读出来就是空的。读不到的话
+  // 顺手把表单区域里所有「看起来像下拉/按钮」的元素文字都列一份,方便定位到底
+  // 类别控件长什么样、该怎么改。
+  let categoryConditionDiag = null;
+  if (!category || !condition) {
+    categoryConditionDiag = Array.from(
+      formRoot.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], div[role="button"], span[role="button"]')
+    )
+      .map((el) => (el.getAttribute('aria-label') || el.textContent || '').trim())
+      .filter(Boolean)
+      .slice(0, 20);
+  }
+
   return {
     title: readCurrentValue(titleEl),
     price: readCurrentValue(priceEl),
     description: readCurrentValue(descEl),
-    category: readCurrentValue(categoryEl),
-    condition: readCurrentValue(conditionEl),
+    category,
+    condition,
     location: readCurrentValue(locationEl),
     photos,
+    categoryConditionDiag,
   };
 }
 

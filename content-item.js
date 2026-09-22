@@ -17,7 +17,17 @@
     if (!ready) {
       throw new Error(`没能展开完整的编辑表单,读取详情失败。诊断信息:${JSON.stringify(collectDiagnostics())}`);
     }
-    return scrapeVisibleListingForm();
+    const listing = await scrapeVisibleListingForm();
+    // 类别/成色读不到,会导致重新上架时新表单也没法选这两个必填项,Facebook
+    // 的「下一步/发布」按钮永远是灰的——把当时页面上看起来像下拉/按钮的候选
+    // 元素记进日志,方便确认到底是哪个控件没识别出来。
+    if (!listing.category || !listing.condition) {
+      appendLog({
+        level: 'error',
+        text: `「${listing.title || '商品'}」没能读到类别或成色(类别:${listing.category || '(空)'} / 成色:${listing.condition || '(空)'}),重新上架时 Facebook 会因为缺必填项发不出去。这个页面上找到的候选按钮/下拉文字:${JSON.stringify(listing.categoryConditionDiag)}`,
+      });
+    }
+    return listing;
   }
 
   async function deleteListingOnPage() {
