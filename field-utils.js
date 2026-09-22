@@ -225,11 +225,31 @@ async function scrapeVisibleListingForm() {
 
 // 出问题时收集一点页面结构信息(不含用户输入的具体商品内容),方便反馈给开发者
 // 定位是哪里的选择器失效了。
+//
+// 之前这里是不分青红皂白地取页面上前 20 个按钮——Facebook 顶部导航栏(返回、
+// 通知、头像菜单……)在 DOM 里排在最前面,20 个名额经常被这些完全无关的按钮
+// 占满,真正想看的表单/发布按钮反而一个都拿不到。现在把明显是顶部导航栏/页头
+// 里的按钮排除掉,并且额外单独找一遍文字里带「发布/下一步/continue/publish/
+// next」这些关键词的元素——不管它在不在前 20 个里,只要页面上存在,都会被
+// 列出来,包括是不是被禁用(aria-disabled),这是排查"找不到发布按钮"这类问题
+// 最直接有用的信息。
 function collectDiagnostics() {
-  const buttons = Array.from(document.querySelectorAll('div[role="button"], button, a[role="button"]'))
-    .map((el) => (el.getAttribute('aria-label') || el.textContent || '').trim())
+  const isChrome = (el) => !!el.closest('header, nav, [role="navigation"], [role="banner"]');
+  const clickableSelector = 'div[role="button"], span[role="button"], button, a[role="button"], [role="menuitem"], [role="tab"]';
+  const allClickables = Array.from(document.querySelectorAll(clickableSelector));
+  const textOf = (el) => (el.getAttribute('aria-label') || el.textContent || '').trim();
+  const isDisabled = (el) => el.getAttribute('aria-disabled') === 'true' || el.disabled === true;
+
+  const contentButtons = allClickables
+    .filter((el) => !isChrome(el))
+    .map(textOf)
     .filter(Boolean)
-    .slice(0, 20);
+    .slice(0, 30);
+
+  const publishLikeButtons = allClickables
+    .map((el) => ({ text: textOf(el), disabled: isDisabled(el), inChrome: isChrome(el) }))
+    .filter((b) => b.text && /publish|next|continue|发布|下一步|继续|刊登/i.test(b.text));
+
   const itemLinks = Array.from(document.querySelectorAll('a[href*="/marketplace/item/"]')).length;
   const allLinks = document.querySelectorAll('a').length;
   return {
@@ -237,6 +257,8 @@ function collectDiagnostics() {
     pageTitle: document.title,
     totalLinks: allLinks,
     marketplaceItemLinks: itemLinks,
-    sampleButtonTexts: buttons,
+    totalClickables: allClickables.length,
+    sampleButtonTexts: contentButtons,
+    publishLikeButtons,
   };
 }

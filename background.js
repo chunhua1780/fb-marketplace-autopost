@@ -197,7 +197,11 @@ async function processListing(listing) {
 
     const result = await chrome.tabs.sendMessage(tab.id, { type: 'FILL_LISTING', listing, settings });
     if (!result || !result.ok) {
-      throw new Error((result && result.error) || '内容脚本没有返回结果');
+      // steps 里记的是「走到哪一步了」的完整轨迹,包括类别/成色这种选不中会被
+      // 跳过、但不会让整个流程失败的非致命提示——之前这里只把最后那一条错误
+      // 原因往外抛,中间「其实类别没选上」这种关键线索就丢了,日志里看不出来。
+      const stepsTrail = result && result.steps && result.steps.length ? ` | 步骤记录:${JSON.stringify(result.steps)}` : '';
+      throw new Error(((result && result.error) || '内容脚本没有返回结果') + stepsTrail);
     }
 
     const published = !!result.published;
