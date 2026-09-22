@@ -110,8 +110,8 @@ const I18N = {
     alertFaqRequired: 'Please fill in both keywords and the reply script',
 
     importStatusNotFb:
-      '⚠️ Current tab is not a Facebook Marketplace page. Please switch to your "Your listings / Selling" page ' +
-      'in the browser first, then come back and click the extension icon.',
+      '⚠️ Current tab is not your Facebook "Your listings / Selling" page (facebook.com/marketplace/you/selling). ' +
+      'Please switch to that page in the browser first, then come back and click the extension icon.',
     importStatusConnected: '✅ Connected to current page: {url}',
     importStatusNotConnected:
       "⚠️ The extension script hasn't connected to this page yet. The most common cause is this Facebook tab " +
@@ -219,7 +219,7 @@ const I18N = {
     alertQueueFail: '无法开始: {error}',
     alertFaqRequired: '关键词和话术都要填写',
 
-    importStatusNotFb: '⚠️ 当前标签页不是 Facebook Marketplace 页面。请先在浏览器里切换到你的「我的商品/正在出售」页面,再回来点插件图标。',
+    importStatusNotFb: '⚠️ 当前标签页不是你的「我的商品/正在出售」页面(facebook.com/marketplace/you/selling)。请先在浏览器里切换到那个页面,再回来点插件图标。',
     importStatusConnected: '✅ 已连接到当前页面:{url}',
     importStatusNotConnected:
       '⚠️ 插件脚本还没连上这个页面。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下' +

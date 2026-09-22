@@ -161,10 +161,10 @@ async function processListing(listing) {
   const oldItemId = listing.sourceItemId || null;
   let tab;
   try {
-    // 开在前台(active: true)——之前放在后台标签页,自动填表这个过程用户完全
-    // 看不到,"到底填了没有""为什么发布页面还是空的"没法当场判断。开在前台就
-    // 能亲眼看到表单有没有被自动填上。
-    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/item', active: true });
+    // 开在后台(active: false)——用户明确要求不要一直弹出新页面打断当前正在
+    // 看的东西。想看某一次到底填成什么样,去「发布队列」里看日志(会记录每一步
+    // 和最后结果),不需要真的守着这个标签页看。
+    tab = await chrome.tabs.create({ url: 'https://www.facebook.com/marketplace/create/item', active: false });
     await waitForContentReady(tab.id);
 
     const result = await chrome.tabs.sendMessage(tab.id, { type: 'FILL_LISTING', listing, settings });

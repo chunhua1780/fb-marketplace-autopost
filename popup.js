@@ -280,7 +280,7 @@ async function loadSettings() {
 
 async function detectCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace')) {
+  if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace/you/')) {
     els.importStatus.textContent = t('importStatusNotFb');
     els.startSelectBtn.disabled = true;
     scanTabId = null;
