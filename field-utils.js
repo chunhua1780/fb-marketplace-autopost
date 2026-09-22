@@ -161,6 +161,28 @@ async function ensureEditFormVisible() {
   return !!ready;
 }
 
+// 找一个「刚好包住这几个已知表单字段」的容器,用来把图片搜索范围收窄到这条
+// 商品自己的编辑区域——不这么做的话,图片搜索会跑到整个网页,把侧边栏「相关
+// 商品推荐」、导航栏头像之类别的商品的图也一起当成这条商品的照片抓下来,导致
+// 重新上架的商品带着不相关的图。已知字段有两个以上时,从其中一个往上爬,直到
+// 找到同时包住所有已知字段的祖先节点;只有一个字段时没法这样定位,退而求其次
+// 往上爬固定几层,大致等于整个表单区块的大小。
+function findFormRoot(elements) {
+  const els = elements.filter(Boolean);
+  if (els.length >= 2) {
+    let node = els[0].parentElement;
+    while (node && node !== document.body) {
+      if (els.every((el) => node.contains(el))) return node;
+      node = node.parentElement;
+    }
+  } else if (els.length === 1) {
+    let node = els[0];
+    for (let i = 0; i < 6 && node.parentElement; i++) node = node.parentElement;
+    return node;
+  }
+  return document;
+}
+
 // 读取「当前页面上正在显示的」商品编辑表单字段 + 图片。不管这个表单是整页的
 // 编辑页,还是弹窗里临时展开的编辑区,只要标题输入框已经出现在页面上,这个
 // 函数都能用——content-item.js(整页编辑)和 content-my-listings.js(弹窗内
@@ -173,8 +195,10 @@ async function scrapeVisibleListingForm() {
   const conditionEl = findFieldByLabel(FB_LABELS.condition);
   const locationEl = findFieldByLabel(FB_LABELS.location);
 
+  const formRoot = findFormRoot([titleEl, priceEl, descEl, categoryEl, conditionEl, locationEl]);
+
   const photos = [];
-  const imgs = Array.from(document.querySelectorAll('img'))
+  const imgs = Array.from(formRoot.querySelectorAll('img'))
     .filter((img) => img.naturalWidth > 80 && img.naturalHeight > 80 && /^https?:/.test(img.src))
     .slice(0, 20);
   for (const img of imgs) {

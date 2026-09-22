@@ -12,14 +12,14 @@
   </header>
 
   <section id="import-section">
-    <h2>点选导入我已有的商品</h2>
+    <h2>① 点选我已有的商品</h2>
     <p class="hint">
       先在浏览器里打开你自己 Facebook 的「Marketplace → 我的商品/正在出售」页面,
       保持它是你当前正在看的这个标签页。点「开始点选商品」后回到那个页面,把
-      鼠标移到你自己的商品上会出现蓝色高亮框,点一下,Facebook 会弹出商品详情——
-      插件会自动读取完整信息(标题/价格/类别/成色/描述/图片)、自动关掉弹窗,
-      商品会直接出现在下面的「商品队列」里,可以接着点下一个。这个面板可以关掉
-      没关系,点选状态会保留,重开面板会自动恢复。
+      鼠标移到你自己的商品上会出现蓝色高亮框,点一下就会立刻选中(不会弹出任何
+      东西、不挡屏幕),可以连续点很多个;每点一个,下面的「商品队列」里会马上
+      出现这一条,后台会自动把完整信息(类别/成色/描述/图片)读完补上。这个面板
+      可以关掉没关系,点选状态会保留,重开面板会自动恢复。
     </p>
     <div id="import-status" class="hint"></div>
     <div class="row">
@@ -29,50 +29,13 @@
     <div id="select-progress" class="hint"></div>
   </section>
 
-  <section id="form-section">
-    <h2 id="form-title">手动新增商品</h2>
-    <input type="hidden" id="editing-id" />
-    <label>标题
-      <input type="text" id="f-title" placeholder="例如:实木餐桌 四人座" />
-    </label>
-    <label>价格
-      <input type="text" id="f-price" placeholder="例如:1200" />
-    </label>
-    <label>类别(需与 Facebook 页面上显示的名称完全一致)
-      <input type="text" id="f-category" placeholder="例如:家具 / Furniture" />
-    </label>
-    <label>成色
-      <input type="text" id="f-condition" placeholder="例如:二手 - 良好 / Used - Good" />
-    </label>
-    <label>地点
-      <input type="text" id="f-location" placeholder="例如:San Francisco, CA" />
-    </label>
-    <label>描述
-      <textarea id="f-description" rows="4" placeholder="商品描述..."></textarea>
-    </label>
-    <label>照片
-      <input type="file" id="f-photos" accept="image/*" multiple />
-    </label>
-    <div id="photo-preview"></div>
-    <label class="checkbox">
-      <input type="checkbox" id="f-repost-enabled" />
-      到期后自动重新上架(保持商品排名靠前)
-    </label>
-    <label id="f-repost-days-wrap" hidden>间隔天数
-      <input type="number" id="f-repost-days" min="1" value="7" />
-    </label>
-    <label class="checkbox" id="f-delete-old-wrap" hidden>
-      <input type="checkbox" id="f-delete-old" />
-      重新上架成功后,自动删除 Facebook 上的旧版本(⚠️ 不可撤销,还需要在下面「发布设置」里打开总开关才会生效)
-    </label>
-    <div class="row">
-      <button id="save-btn">保存商品</button>
-      <button id="cancel-edit-btn" class="secondary" hidden>取消编辑</button>
-    </div>
-  </section>
-
   <section id="list-section">
-    <h2>商品队列</h2>
+    <h2>② 商品队列(自动重新上架)</h2>
+    <p class="hint">
+      点选导入的商品会自动进入「到期自动重新上架」循环——过一段随机的时间就会
+      自动把这条商品删掉旧的、发一个新的上去,保持它显示成最新,不用再手动调节。
+      要不要连旧版本一起自动删除,在下面「发布设置」里有一个总开关(默认开启)。
+    </p>
     <ul id="listing-list"></ul>
   </section>
 
@@ -90,7 +53,7 @@
     </label>
     <label class="checkbox">
       <input type="checkbox" id="s-auto-delete-old" />
-      允许「重新上架」自动删除 Facebook 上的旧商品总开关(⚠️ 不可撤销,默认关闭)
+      重新上架时自动删除 Facebook 上的旧商品(⚠️ 不可撤销,默认开启;关掉后新导入的商品还是会自动重新上架,只是不删旧版本)
     </label>
     <button id="save-settings-btn">保存发布设置</button>
   </section>
@@ -161,6 +124,48 @@
       <button id="stop-btn" class="secondary">停止</button>
     </div>
     <div id="log"></div>
+  </section>
+
+  <section id="form-section">
+    <h2 id="form-title">手动新增商品(不常用,放在最后)</h2>
+    <input type="hidden" id="editing-id" />
+    <label>标题
+      <input type="text" id="f-title" placeholder="例如:实木餐桌 四人座" />
+    </label>
+    <label>价格
+      <input type="text" id="f-price" placeholder="例如:1200" />
+    </label>
+    <label>类别(需与 Facebook 页面上显示的名称完全一致)
+      <input type="text" id="f-category" placeholder="例如:家具 / Furniture" />
+    </label>
+    <label>成色
+      <input type="text" id="f-condition" placeholder="例如:二手 - 良好 / Used - Good" />
+    </label>
+    <label>地点
+      <input type="text" id="f-location" placeholder="例如:San Francisco, CA" />
+    </label>
+    <label>描述
+      <textarea id="f-description" rows="4" placeholder="商品描述..."></textarea>
+    </label>
+    <label>照片
+      <input type="file" id="f-photos" accept="image/*" multiple />
+    </label>
+    <div id="photo-preview"></div>
+    <label class="checkbox">
+      <input type="checkbox" id="f-repost-enabled" />
+      到期后自动重新上架(保持商品排名靠前)
+    </label>
+    <label id="f-repost-days-wrap" hidden>间隔天数
+      <input type="number" id="f-repost-days" min="1" value="7" />
+    </label>
+    <label class="checkbox" id="f-delete-old-wrap" hidden>
+      <input type="checkbox" id="f-delete-old" />
+      重新上架成功后,自动删除 Facebook 上的旧版本(⚠️ 不可撤销,还需要在上面「发布设置」里打开总开关才会生效)
+    </label>
+    <div class="row">
+      <button id="save-btn">保存商品</button>
+      <button id="cancel-edit-btn" class="secondary" hidden>取消编辑</button>
+    </div>
   </section>
 
   <script src="storage.js"></script>

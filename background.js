@@ -104,6 +104,16 @@ function randomInt(a, b) {
   return Math.floor(Math.random() * (hi - lo + 1)) + lo;
 }
 
+// 到期重新上架的时间点故意加一点随机浮动(±15%),不要每次都精确卡在「第 N 天
+// 的同一分钟」——一个商品每隔一模一样的时长准时被删除重发,时间点越规律,
+// 越像是脚本在自动操作,加上随机浮动更接近真人「过几天想起来了才弄一下」的
+// 节奏。
+function computeNextRepostAt(days) {
+  const base = Math.max(1, Number(days) || 7) * 24 * 60 * 60 * 1000;
+  const jitterRatio = 0.85 + Math.random() * 0.3; // 0.85x ~ 1.15x
+  return Date.now() + Math.round(base * jitterRatio);
+}
+
 // ---------- 发布队列 ----------
 
 async function tick() {
@@ -170,7 +180,7 @@ async function processListing(listing) {
     }
     if (published && listing.repostEnabled) {
       const days = Number(listing.repostIntervalDays) > 0 ? Number(listing.repostIntervalDays) : 7;
-      fields.nextRepostAt = Date.now() + days * 24 * 60 * 60 * 1000;
+      fields.nextRepostAt = computeNextRepostAt(days);
     }
     await setListingFields(listing.id, fields);
     await appendLog({
@@ -302,6 +312,21 @@ async function processDetailRead(item) {
   }
 }
 
+// 商品一旦导入完成(不管完整详情有没有读成功),就直接自动进入「到期自动重新
+// 上架」的循环——这正是这个插件现在存在的核心目的,不需要用户再进每条商品自己
+// 的设置里手动勾一次。要不要连 Facebook 上的旧版本一起自动删掉,跟着设置里的
+// 全局总开关走(默认开启;不放心的话可以在「发布设置」里关掉这一个总开关,
+// 关掉之后新导入的商品还是会自动重新上架,只是不会删旧版本,更保守一些)。
+async function autoRepostFieldsFor(repostDays) {
+  const settings = await getSettings();
+  return {
+    repostEnabled: true,
+    repostIntervalDays: repostDays,
+    deleteOldOnRepost: !!settings.autoDeleteOldListings,
+    nextRepostAt: computeNextRepostAt(repostDays),
+  };
+}
+
 // itemId 是 Facebook 那边的真实商品编号,只用在两个地方:导入去重、以及
 // 「重新上架后自动删除旧版本」。读不到也完全不影响导入——标题/价格这些读到了
 // 就先存下来,用插件自己的编号(genListing 里自动生成)管理。
@@ -313,6 +338,7 @@ async function saveScrapedListing(itemId, scraped, quickInfo) {
   const listings = await getListings();
   const idx = itemId ? listings.findIndex((l) => l.sourceItemId === itemId) : -1;
   const title = scraped.title || quickInfo.title || (idx !== -1 ? listings[idx].title : '');
+  const repostDays = (idx !== -1 && Number(listings[idx].repostIntervalDays) > 0) ? Number(listings[idx].repostIntervalDays) : 7;
   const fields = {
     title,
     price: scraped.price || quickInfo.priceText || (idx !== -1 ? listings[idx].price : ''),
@@ -322,6 +348,7 @@ async function saveScrapedListing(itemId, scraped, quickInfo) {
     location: scraped.location || '',
     photos: scraped.photos || [],
     status: 'imported',
+    ...(await autoRepostFieldsFor(repostDays)),
   };
   if (idx !== -1) {
     listings[idx] = { ...listings[idx], ...fields };
@@ -345,7 +372,8 @@ async function saveBasicListing(itemId, quickInfo) {
   if (idx !== -1) {
     // 占位记录已经在了(queueDetailRead 那一步存的),完整详情没读成功,
     // 把状态从「读取中」改回可用,标题/价格保留原样,不然会一直卡在「读取中」。
-    listings[idx].status = 'imported';
+    const repostDays = Number(listings[idx].repostIntervalDays) > 0 ? Number(listings[idx].repostIntervalDays) : 7;
+    listings[idx] = { ...listings[idx], status: 'imported', ...(await autoRepostFieldsFor(repostDays)) };
     await saveListings(listings);
     await appendLog({
       level: 'success',
@@ -361,6 +389,7 @@ async function saveBasicListing(itemId, quickInfo) {
       sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
       status: 'imported',
       importedAt: Date.now(),
+      ...(await autoRepostFieldsFor(7)),
     })
   );
   await saveListings(listings);

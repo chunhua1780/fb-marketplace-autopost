@@ -14,9 +14,11 @@ if (typeof globalThis.DEFAULT_SETTINGS === 'undefined') {
     // false = 只自动填表,停在发布前一步,由你本人手动点击「发布」确认(默认更安全)
     autoPublish: false,
 
-    // 重新上架时是否允许自动删除 Facebook 上的旧商品——这是全局总开关,
-    // 默认关闭;要真正生效还需要在每条商品自己的设置里也打开 deleteOldOnRepost
-    autoDeleteOldListings: false,
+    // 重新上架时是否自动删除 Facebook 上的旧商品——默认开启,因为「删旧发新、
+    // 保持最新」本来就是这个插件存在的核心目的,不应该还要用户自己去每条商品
+    // 设置里手动打开。不放心的话可以在「发布设置」里关掉这个总开关,关掉之后
+    // 新导入的商品还是会自动重新上架,只是不会删除旧版本,更保守一些。
+    autoDeleteOldListings: true,
 
     // 商家信息(用于自动回复里告知买家地址/购买方式)
     sellerAddress: '',
