@@ -27,6 +27,21 @@ const I18N = {
       'settings" (on by default).',
     listEmpty: 'No items yet — use "Start selecting" above to import some, or manually add one at the bottom of the panel.',
 
+    filestoreH2: 'Local folder mirror',
+    filestoreHint:
+      "Optional: pick a folder on your computer once, and every imported item's info and photos will " +
+      'automatically be mirrored there in the background (one subfolder per item) — you can browse it directly ' +
+      "in your file manager. This is just a convenience copy; the extension itself keeps working from its own " +
+      "storage even if this isn't set up or access lapses.",
+    pickFolderBtn: 'Choose save folder',
+    clearFolderBtn: 'Clear',
+    filestoreNotSet: 'Not set up — imported items are only kept in the extension\'s own storage for now.',
+    filestoreGranted: '✅ Folder access granted — items are automatically mirrored there.',
+    filestoreNeedsReauth: '⚠️ A folder was chosen before, but access needs to be re-confirmed. Click "Choose save folder" again and pick the same folder.',
+    filestoreUnsupported: '⚠️ Your browser does not support choosing a local folder (needs a recent Chrome). This feature is optional and the rest of the extension is unaffected.',
+    filestorePickFailed: 'Could not set the folder: {error}',
+    filestoreCleared: 'Folder mirror turned off.',
+
     settingsH2: 'Posting settings',
     sMinLabel: 'Minimum interval per item (seconds)',
     sMaxLabel: 'Maximum interval per item (seconds)',
@@ -142,6 +157,20 @@ const I18N = {
       '的上去,保持它显示成最新,不用再手动调节。要不要连旧版本一起自动删除,在下面「发布设置」里有一个总开关' +
       '(默认开启)。',
     listEmpty: '还没有商品——可以在上面「开始点选商品」导入,或者在面板最下面手动新增一个',
+
+    filestoreH2: '本地文件夹镜像',
+    filestoreHint:
+      '可选功能:在电脑上选一个文件夹,选一次之后,每个导入的商品的信息和图片都会自动在后台同步写一份到那个' +
+      '文件夹里(每个商品一个子文件夹),可以直接在文件管理器里打开看。这只是锦上添花的备份,就算没设置或者' +
+      '权限过期了,插件本身照样能正常工作。',
+    pickFolderBtn: '选择保存文件夹',
+    clearFolderBtn: '清除',
+    filestoreNotSet: '还没设置——导入的商品目前只保存在插件自己的存储里。',
+    filestoreGranted: '✅ 已获得文件夹读写权限,商品会自动同步保存到这里。',
+    filestoreNeedsReauth: '⚠️ 之前选过一个文件夹,但权限需要重新确认。请再点一次「选择保存文件夹」,选同一个文件夹就行。',
+    filestoreUnsupported: '⚠️ 你的浏览器不支持选择本地文件夹(需要较新版本的 Chrome)。这是可选功能,不影响插件其他部分正常使用。',
+    filestorePickFailed: '设置文件夹失败:{error}',
+    filestoreCleared: '已关闭文件夹镜像。',
 
     settingsH2: '发布设置',
     sMinLabel: '每个商品间隔最短(秒)',

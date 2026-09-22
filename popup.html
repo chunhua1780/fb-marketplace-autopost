@@ -48,6 +48,21 @@
     <ul id="listing-list"></ul>
   </section>
 
+  <section id="filestore-section">
+    <h2 data-i18n="filestoreH2">Local folder mirror</h2>
+    <p class="hint" data-i18n="filestoreHint">
+      Optional: pick a folder on your computer once, and every imported item's info and photos will automatically
+      be mirrored there in the background (one subfolder per item) — you can browse it directly in your file
+      manager. This is just a convenience copy; the extension itself keeps working from its own storage even if
+      this isn't set up or access lapses.
+    </p>
+    <div id="filestore-status" class="hint"></div>
+    <div class="row">
+      <button id="pick-folder-btn" data-i18n="pickFolderBtn">Choose save folder</button>
+      <button id="clear-folder-btn" class="secondary" data-i18n="clearFolderBtn">Clear</button>
+    </div>
+  </section>
+
   <section id="settings-section">
     <h2 data-i18n="settingsH2">Posting settings</h2>
     <label><span data-i18n="sMinLabel">Minimum interval per item (seconds)</span>
@@ -178,6 +193,7 @@
   </section>
 
   <script src="storage.js"></script>
+  <script src="filestore.js"></script>
   <script src="i18n.js"></script>
   <script src="popup.js"></script>
 </body>

@@ -14,6 +14,9 @@ window.addEventListener('unhandledrejection', (e) => showFatalError((e.reason &&
 
 const els = {
   uiLang: document.getElementById('ui-lang'),
+  filestoreStatus: document.getElementById('filestore-status'),
+  pickFolderBtn: document.getElementById('pick-folder-btn'),
+  clearFolderBtn: document.getElementById('clear-folder-btn'),
   importStatus: document.getElementById('import-status'),
   startSelectBtn: document.getElementById('start-select-btn'),
   stopSelectBtn: document.getElementById('stop-select-btn'),
@@ -324,6 +327,40 @@ els.stopSelectBtn.addEventListener('click', async () => {
   await refreshSelectModeUi();
 });
 
+// ---------- 本地文件夹镜像 ----------
+
+async function refreshFilestoreStatus() {
+  if (typeof window.showDirectoryPicker !== 'function') {
+    els.filestoreStatus.textContent = t('filestoreUnsupported');
+    els.pickFolderBtn.disabled = true;
+    return;
+  }
+  const handle = await getSavedDirHandle();
+  if (!handle) {
+    els.filestoreStatus.textContent = t('filestoreNotSet');
+    return;
+  }
+  const granted = await hasWritableFolderAccess();
+  els.filestoreStatus.textContent = granted ? t('filestoreGranted') : t('filestoreNeedsReauth');
+}
+
+els.pickFolderBtn.addEventListener('click', async () => {
+  try {
+    await pickSaveFolder();
+  } catch (err) {
+    // 用户自己点了取消(AbortError)不算错误,不用提示
+    if (err && err.name !== 'AbortError') {
+      els.filestoreStatus.textContent = t('filestorePickFailed', { error: (err && err.message) || err });
+    }
+  }
+  await refreshFilestoreStatus();
+});
+
+els.clearFolderBtn.addEventListener('click', async () => {
+  await clearSavedDirHandle();
+  els.filestoreStatus.textContent = t('filestoreCleared');
+});
+
 els.saveSettingsBtn.addEventListener('click', async () => {
   const settings = await getSettings();
   await saveSettings({
@@ -442,6 +479,7 @@ function renderVersionBadge() {
 async function renderAllDynamic() {
   await safeRun('current tab', detectCurrentTab);
   await safeRun('select mode', refreshSelectModeUi);
+  await safeRun('folder mirror', refreshFilestoreStatus);
   await safeRun('listings', renderList);
   await safeRun('settings', loadSettings);
   await safeRun('log', renderLog);

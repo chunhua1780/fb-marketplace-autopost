@@ -10,7 +10,7 @@
 // 页面导航读一遍完整详情,不依赖任何程序模拟点击(之前用合成点击在后台重新触发
 // 弹窗,发现不可靠,Facebook 的 React 逻辑不一定认 isTrusted=false 的事件)。
 
-importScripts('storage.js');
+importScripts('storage.js', 'filestore.js');
 
 const ALARM_QUEUE_TICK = 'fb-marketplace-queue-tick';
 const ALARM_REPOST_CHECK = 'fb-marketplace-repost-check';
@@ -155,11 +155,20 @@ async function repostNow(id) {
   return { ok: true };
 }
 
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function processListing(listing) {
   await setListingFields(listing.id, { status: 'running' });
   const settings = await getSettings();
   const oldItemId = listing.sourceItemId || null;
   let tab;
+  // 「只填表不发布」是用户自己在设置里关掉自动发布才会走到的路径,这种情况下
+  // 故意不自动关标签页——留给用户自己找到这个页面手动确认发布。发布成功、或者
+  // 中途出错这两种情况都会在下面的 finally 里自动关掉标签页,不会一直堆着
+  // (以前失败的情况没有清理标签页,连续失败几次标签页就会越堆越多)。
+  let keepTabOpen = false;
   try {
     // 开在后台(active: false)——用户明确要求不要一直弹出新页面打断当前正在
     // 看的东西。想看某一次到底填成什么样,去「发布队列」里看日志(会记录每一步
@@ -173,6 +182,7 @@ async function processListing(listing) {
     }
 
     const published = !!result.published;
+    keepTabOpen = !published;
     const fields = { status: published ? 'posted' : 'filled_awaiting_review', lastError: null, lastRunAt: Date.now() };
     if (published && result.newItemId) {
       fields.sourceItemId = result.newItemId;
@@ -189,7 +199,8 @@ async function processListing(listing) {
     });
 
     if (published) {
-      setTimeout(() => chrome.tabs.remove(tab.id).catch(() => {}), 3000);
+      await wait(1500); // 给 Facebook 一点时间把发布这个请求处理完,再关标签页
+      await writeListingToFolder({ ...listing, ...fields }).catch(() => {});
     }
 
     // 只有「新的确认发布成功」+ 单条商品开了 deleteOldOnRepost + 全局总开关也开着,
@@ -206,6 +217,10 @@ async function processListing(listing) {
   } catch (err) {
     await setListingFields(listing.id, { status: 'failed', lastError: String((err && err.message) || err), lastRunAt: Date.now() });
     await appendLog({ level: 'error', text: `「${listing.title}」处理失败: ${(err && err.message) || err}` });
+  } finally {
+    if (tab && !keepTabOpen) {
+      chrome.tabs.remove(tab.id).catch(() => {});
+    }
   }
 }
 
@@ -350,20 +365,22 @@ async function saveScrapedListing(itemId, scraped, quickInfo) {
     status: 'imported',
     ...(await autoRepostFieldsFor(repostDays)),
   };
+  let saved;
   if (idx !== -1) {
     listings[idx] = { ...listings[idx], ...fields };
+    saved = listings[idx];
   } else {
-    listings.push(
-      genListing({
-        ...fields,
-        sourceItemId: itemId || null,
-        sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
-        importedAt: Date.now(),
-      })
-    );
+    saved = genListing({
+      ...fields,
+      sourceItemId: itemId || null,
+      sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
+      importedAt: Date.now(),
+    });
+    listings.push(saved);
   }
   await saveListings(listings);
   await appendLog({ level: 'success', text: `已读取完整信息:「${title || itemId}」` });
+  writeListingToFolder(saved).catch(() => {});
 }
 
 async function saveBasicListing(itemId, quickInfo) {
@@ -379,24 +396,25 @@ async function saveBasicListing(itemId, quickInfo) {
       level: 'success',
       text: `「${listings[idx].title || itemId}」完整详情读取失败,已保留标题/价格,可以之后手动重试`,
     });
+    writeListingToFolder(listings[idx]).catch(() => {});
     return;
   }
-  listings.push(
-    genListing({
-      title: quickInfo.title || '',
-      price: quickInfo.priceText || '',
-      sourceItemId: itemId || null,
-      sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
-      status: 'imported',
-      importedAt: Date.now(),
-      ...(await autoRepostFieldsFor(7)),
-    })
-  );
+  const saved = genListing({
+    title: quickInfo.title || '',
+    price: quickInfo.priceText || '',
+    sourceItemId: itemId || null,
+    sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
+    status: 'imported',
+    importedAt: Date.now(),
+    ...(await autoRepostFieldsFor(7)),
+  });
+  listings.push(saved);
   await saveListings(listings);
   await appendLog({
     level: 'success',
     text: `已导入基本信息(标题/价格):「${quickInfo.title || itemId || '商品'}」`,
   });
+  writeListingToFolder(saved).catch(() => {});
 }
 
 async function setListingFields(id, fields) {
