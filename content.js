@@ -121,7 +121,7 @@
       if (listing.settingsAutoPublish) {
         steps.push('自动翻页并发布');
         let publishBtn = null;
-        for (let i = 0; i < 5; i++) {
+        for (let i = 0; i < 8; i++) {
           publishBtn = findClickableByText(FB_LABELS.publish);
           if (publishBtn) break;
           const nextBtn = findClickableByText(FB_LABELS.next);
@@ -130,7 +130,12 @@
           await fbSleep(1200);
         }
         if (!publishBtn) {
-          throw new Error('已自动填好表单,但没找到「发布」按钮,请手动检查并点击发布');
+          // 之前这里的报错不带诊断信息,排查一次就要问用户要一次截图——现在跟
+          // 「找不到标题输入框」那个报错一样,把当前页面上所有看起来像按钮的
+          // 文字都列出来,下次再出这个错,日志里就直接有答案,不用再来回一轮。
+          throw new Error(
+            `已自动填好表单,但没找到「发布」按钮,请手动检查并点击发布。诊断信息:${JSON.stringify(collectDiagnostics())}`
+          );
         }
         publishBtn.click();
         await fbSleep(2000);
