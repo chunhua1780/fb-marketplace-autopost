@@ -13,6 +13,7 @@ window.addEventListener('error', (e) => showFatalError(e.message));
 window.addEventListener('unhandledrejection', (e) => showFatalError((e.reason && e.reason.message) || String(e.reason)));
 
 const els = {
+  uiLang: document.getElementById('ui-lang'),
   importStatus: document.getElementById('import-status'),
   startSelectBtn: document.getElementById('start-select-btn'),
   stopSelectBtn: document.getElementById('stop-select-btn'),
@@ -69,14 +70,14 @@ const els = {
 let currentPhotos = []; // { name, dataUrl }[]
 let scanTabId = null; // 当前 Facebook 标签页 id
 
-const STATUS_LABEL = {
-  pending: '待发布',
-  running: '发布中...',
-  filled_awaiting_review: '已填表,待你确认发布',
-  posted: '已发布',
-  imported: '已从 Facebook 导入(未在队列中)',
-  reading_details: '⏳ 正在后台读取完整信息...',
-  failed: '失败',
+const STATUS_KEY = {
+  pending: 'statusPending',
+  running: 'statusRunning',
+  filled_awaiting_review: 'statusFilledAwaitingReview',
+  posted: 'statusPosted',
+  imported: 'statusImported',
+  reading_details: 'statusReadingDetails',
+  failed: 'statusFailed',
 };
 
 function fileToDataUrl(file) {
@@ -110,7 +111,7 @@ els.repostEnabled.addEventListener('change', () => {
 
 function resetForm() {
   els.editingId.value = '';
-  els.formTitle.textContent = '手动新增商品';
+  els.formTitle.textContent = t('formTitleAdd');
   els.title.value = '';
   els.price.value = '';
   els.category.value = '';
@@ -137,7 +138,7 @@ els.photos.addEventListener('change', async () => {
 els.saveBtn.addEventListener('click', async () => {
   const title = els.title.value.trim();
   if (!title) {
-    alert('请填写标题');
+    alert(t('alertTitleRequired'));
     return;
   }
   const listings = await getListings();
@@ -172,7 +173,7 @@ async function editListing(id) {
   const l = listings.find((x) => x.id === id);
   if (!l) return;
   els.editingId.value = l.id;
-  els.formTitle.textContent = '编辑商品';
+  els.formTitle.textContent = t('formTitleEdit');
   els.title.value = l.title || '';
   els.price.value = l.price || '';
   els.category.value = l.category || '';
@@ -191,7 +192,7 @@ async function editListing(id) {
 }
 
 async function deleteListing(id) {
-  if (!confirm('确定从插件里删除这个商品吗?(不会影响它在 Facebook 上是否存在)')) return;
+  if (!confirm(t('confirmDeleteListing'))) return;
   const listings = await getListings();
   await saveListings(listings.filter((l) => l.id !== id));
   await renderList();
@@ -210,14 +211,14 @@ async function resetStatus(id) {
 
 async function repostNow(id) {
   const res = await chrome.runtime.sendMessage({ type: 'REPOST_NOW', id });
-  if (!res || !res.ok) alert('无法开始重新上架: ' + (res && res.error));
+  if (!res || !res.ok) alert(t('alertRepostFail', { error: res && res.error }));
 }
 
 async function renderList() {
   const listings = await getListings();
   els.list.innerHTML = '';
   if (!listings.length) {
-    els.list.innerHTML = '<li class="empty">还没有商品——可以在上面「开始点选商品」导入,或者手动新增一个</li>';
+    els.list.innerHTML = `<li class="empty">${escapeHtml(t('listEmpty'))}</li>`;
     return;
   }
   listings.forEach((l, i) => {
@@ -227,21 +228,21 @@ async function renderList() {
       <div class="listing-main">
         <strong>#${i + 1} ${escapeHtml(l.title)}</strong>
         <span class="price">${escapeHtml(l.price || '')}</span>
-        <span class="status">${STATUS_LABEL[l.status] || l.status}</span>
+        <span class="status">${t(STATUS_KEY[l.status] || l.status)}</span>
       </div>
       ${
         l.sourceItemId
-          ? `<div class="badge">📥 已关联 Facebook 真实商品(编号 ...${escapeHtml(l.sourceItemId.slice(-6))})</div>`
+          ? `<div class="badge">${escapeHtml(t('badgeLinkedFb', { id: l.sourceItemId.slice(-6) }))}</div>`
           : ''
       }
-      ${l.repostEnabled ? `<div class="badge">🔁 每 ${l.repostIntervalDays || 7} 天自动重新上架</div>` : ''}
-      ${l.deleteOldOnRepost ? '<div class="badge">⚠️ 重新上架会自动删旧版本</div>' : ''}
+      ${l.repostEnabled ? `<div class="badge">${escapeHtml(t('badgeRepost', { days: l.repostIntervalDays || 7 }))}</div>` : ''}
+      ${l.deleteOldOnRepost ? `<div class="badge">${escapeHtml(t('badgeDeleteOld'))}</div>` : ''}
       ${l.lastError ? `<div class="error">${escapeHtml(l.lastError)}</div>` : ''}
       <div class="actions">
-        <button data-action="repost">立即重新上架</button>
-        <button data-action="edit">编辑</button>
-        <button data-action="retry">重设为待发布</button>
-        <button data-action="delete" class="danger">删除</button>
+        <button data-action="repost">${escapeHtml(t('actionRepost'))}</button>
+        <button data-action="edit">${escapeHtml(t('actionEdit'))}</button>
+        <button data-action="retry">${escapeHtml(t('actionRetry'))}</button>
+        <button data-action="delete" class="danger">${escapeHtml(t('actionDelete'))}</button>
       </div>
     `;
     li.querySelector('[data-action="repost"]').addEventListener('click', () => repostNow(l.id));
@@ -280,7 +281,7 @@ async function loadSettings() {
 async function detectCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace')) {
-    els.importStatus.textContent = '⚠️ 当前标签页不是 Facebook Marketplace 页面。请先在浏览器里切换到你的「我的商品/正在出售」页面,再回来点插件图标。';
+    els.importStatus.textContent = t('importStatusNotFb');
     els.startSelectBtn.disabled = true;
     scanTabId = null;
     return;
@@ -289,12 +290,10 @@ async function detectCurrentTab() {
   // 光看网址不够——先实际连一下插件脚本,确认它真的已经注入到这个页面里了
   try {
     await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
-    els.importStatus.textContent = `✅ 已连接到当前页面:${tab.url}`;
+    els.importStatus.textContent = t('importStatusConnected', { url: tab.url });
     els.startSelectBtn.disabled = false;
   } catch (err) {
-    els.importStatus.textContent =
-      `⚠️ 插件脚本还没连上这个页面。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下这个标签页(F5),再重新点插件图标。\n` +
-      `网址:${tab.url}\n原始错误:${(err && err.message) || err}`;
+    els.importStatus.textContent = t('importStatusNotConnected', { url: tab.url, error: (err && err.message) || err });
     els.startSelectBtn.disabled = true;
   }
 }
@@ -303,16 +302,14 @@ async function refreshSelectModeUi() {
   const { selectModeActive } = await chrome.storage.local.get('selectModeActive');
   els.startSelectBtn.hidden = !!selectModeActive;
   els.stopSelectBtn.hidden = !selectModeActive;
-  els.selectProgress.textContent = selectModeActive
-    ? '点选模式已开启——回到 Facebook 页面,把鼠标移到你的商品上,点一下就会自动读取并导入,可以连续点多个。'
-    : '';
+  els.selectProgress.textContent = selectModeActive ? t('selectModeOn') : '';
 }
 
 els.startSelectBtn.addEventListener('click', async () => {
   if (!scanTabId) return;
   const res = await chrome.tabs.sendMessage(scanTabId, { type: 'START_SELECT_MODE' }).catch((err) => ({ ok: false, error: err.message }));
   if (!res || !res.ok) {
-    els.importStatus.textContent = '开启失败:' + (res && res.error);
+    els.importStatus.textContent = t('startSelectFailed', { error: res && res.error });
     return;
   }
   await refreshSelectModeUi();
@@ -370,7 +367,7 @@ async function renderFaqs() {
     li.innerHTML = `
       <div class="faq-keywords">${escapeHtml(f.keywords)}</div>
       <div class="faq-answer">${escapeHtml(f.answer)}</div>
-      <button data-action="delete-faq" class="danger">删除</button>
+      <button data-action="delete-faq" class="danger">${escapeHtml(t('faqDeleteBtn'))}</button>
     `;
     li.querySelector('[data-action="delete-faq"]').addEventListener('click', async () => {
       const rest = (await getFaqs()).filter((x) => x.id !== f.id);
@@ -385,7 +382,7 @@ els.faqAddBtn.addEventListener('click', async () => {
   const keywords = els.faqKeywords.value.trim();
   const answer = els.faqAnswer.value.trim();
   if (!keywords || !answer) {
-    alert('关键词和话术都要填写');
+    alert(t('alertFaqRequired'));
     return;
   }
   const faqs = await getFaqs();
@@ -398,7 +395,7 @@ els.faqAddBtn.addEventListener('click', async () => {
 
 els.startBtn.addEventListener('click', async () => {
   const res = await chrome.runtime.sendMessage({ type: 'START_QUEUE' });
-  if (!res || !res.ok) alert('无法开始: ' + (res && res.error));
+  if (!res || !res.ok) alert(t('alertQueueFail', { error: res && res.error }));
 });
 
 els.stopBtn.addEventListener('click', async () => {
@@ -440,12 +437,27 @@ function renderVersionBadge() {
   if (badge) badge.textContent = 'v' + chrome.runtime.getManifest().version;
 }
 
+// 面板本身的界面语言(不影响 Facebook 网页、也不影响重新上架时填进表单的商品
+// 内容本身)。默认英文,选一次会记住,下次打开面板直接生效。
+async function renderAllDynamic() {
+  await safeRun('current tab', detectCurrentTab);
+  await safeRun('select mode', refreshSelectModeUi);
+  await safeRun('listings', renderList);
+  await safeRun('settings', loadSettings);
+  await safeRun('log', renderLog);
+  await safeRun('faqs', renderFaqs);
+}
+
+els.uiLang.addEventListener('change', async () => {
+  await setLang(els.uiLang.value);
+  applyStaticTranslations();
+  await renderAllDynamic();
+});
+
 (async function init() {
+  await loadLang();
+  els.uiLang.value = currentLang;
+  applyStaticTranslations();
   renderVersionBadge();
-  await safeRun('检测当前标签页', detectCurrentTab);
-  await safeRun('点选状态', refreshSelectModeUi);
-  await safeRun('商品列表', renderList);
-  await safeRun('设置', loadSettings);
-  await safeRun('日志', renderLog);
-  await safeRun('常见问题话术', renderFaqs);
+  await renderAllDynamic();
 })();

@@ -17,6 +17,21 @@ h1 {
   margin: 0 0 8px;
 }
 
+.lang-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  margin-bottom: 0;
+}
+
+.lang-picker select {
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  border: 1px solid #ccd0d5;
+}
+
 h2 {
   font-size: 13px;
   margin: 0 0 8px;
