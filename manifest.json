@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FB Marketplace 智能卖家助手",
-  "version": "2.11.0",
+  "version": "2.11.1",
   "description": "导入并批量续期你在 Facebook Marketplace 上已有的商品,自动填表发布,并用商品信息自动回复买家询问(可选 AI 智能回复)",
   "permissions": ["storage", "tabs", "alarms", "sidePanel"],
   "host_permissions": ["https://www.facebook.com/*", "https://api.anthropic.com/*"],

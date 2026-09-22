@@ -22,15 +22,34 @@ let detailReadTickRunning = false;
 // 右侧,点 Facebook 页面本身不会把它关掉,方便一边点商品一边看进度。
 chrome.sidePanel.setPanelBehavior({ openPanelOnActionClick: true }).catch(() => {});
 
+// 早期版本 autoPublish 默认是关的,只要用户点过一次「保存发布设置」,这个 false
+// 就会跟着当时的其他设置一起被写进 chrome.storage,之后哪怕代码里的默认值改成
+// true 也没用——getSettings() 是拿存下来的值去覆盖默认值,不是反过来。这里做
+// 一次性迁移,只跑一次,直接把这两个开关强制打开,不需要用户自己再去设置里点
+// 一次「保存」。
+async function migrateToFullAutoOnce() {
+  const { migratedFullAutoV1 } = await chrome.storage.local.get('migratedFullAutoV1');
+  if (migratedFullAutoV1) return;
+  const settings = await getSettings();
+  await saveSettings({ ...settings, autoPublish: true, autoDeleteOldListings: true });
+  await chrome.storage.local.set({ migratedFullAutoV1: true });
+  await appendLog({
+    level: 'info',
+    text: '已自动打开「自动点击发布」和「自动删除旧版本」这两个设置(全自动重新上架需要这两个都打开;可以在「发布设置」里再关掉)。',
+  });
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   await getFaqs(); // 首次安装时写入默认 FAQ
   chrome.alarms.create(ALARM_REPOST_CHECK, { periodInMinutes: 60 });
   detailReadTick(); // 万一有上次没处理完、还留在队列里的商品,接着处理
+  await migrateToFullAutoOnce();
 });
 
 chrome.runtime.onStartup.addListener(() => {
   chrome.alarms.create(ALARM_REPOST_CHECK, { periodInMinutes: 60 });
   detailReadTick();
+  migrateToFullAutoOnce();
 });
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
