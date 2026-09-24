@@ -238,8 +238,15 @@ async function processListing(listing) {
       await deleteOldListing(oldItemId, listing.title);
     }
   } catch (err) {
-    await setListingFields(listing.id, { status: 'failed', lastError: String((err && err.message) || err), lastRunAt: Date.now() });
-    await appendLog({ level: 'error', text: `「${listing.title}」处理失败: ${(err && err.message) || err}` });
+    // 类别/成色读不到这份诊断是导入那一刻存到商品身上的(见 saveScrapedListing)。
+    // 用户平时复制粘贴给我们看的都是这条"处理失败"日志,不是导入时候那条,
+    // 干脆把这份诊断也一起拼进来,不用非得抓准导入那一刻的日志才有用。
+    const categoryDiagTrail = listing.categoryConditionDiag
+      ? ` | 类别/成色候选:${JSON.stringify(listing.categoryConditionDiag)}`
+      : '';
+    const fullError = String((err && err.message) || err) + categoryDiagTrail;
+    await setListingFields(listing.id, { status: 'failed', lastError: fullError, lastRunAt: Date.now() });
+    await appendLog({ level: 'error', text: `「${listing.title}」处理失败: ${fullError}` });
   } finally {
     if (tab && !keepTabOpen) {
       chrome.tabs.remove(tab.id).catch(() => {});
@@ -386,6 +393,11 @@ async function saveScrapedListing(itemId, scraped, quickInfo) {
     location: scraped.location || '',
     photos: scraped.photos || [],
     status: 'imported',
+    // 类别/成色读不到的时候,把当时页面上的候选按钮文字跟着商品一起存下来——
+    // 不然只有导入那一刻的日志里能看到这份诊断,过一阵子日志被冲掉、或者用户
+    // 直接测「重新上架」失败发的是另一条日志,这份线索就没了。存在商品身上,
+    // 之后不管哪次失败,日志里都能带上同一份诊断,不用非要抓准导入那一刻。
+    categoryConditionDiag: scraped.categoryConditionDiag || null,
     ...(await autoRepostFieldsFor(repostDays)),
   };
   let saved;
