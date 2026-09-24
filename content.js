@@ -178,8 +178,26 @@
           );
         }
         publishBtn.click();
-        await fbSleep(2000);
-        return { ok: true, published: true, steps, ...captureNewItemId() };
+
+        // 点了「发布」按钮不代表真的发布成功了——可能因为漏了某个必填项、
+        // 网络问题之类的原因,Facebook 什么反应都没有,或者弹出一条错误提示,
+        // 网址还留在原来的 /marketplace/create/item。真正发布成功之后,
+        // Facebook 通常会跳转到这个新商品自己的页面,网址里带着新商品的编号——
+        // 用这个当作「是不是真的发布出去了」的判断依据,而不是点了按钮、睡了
+        // 几秒就直接当成功,这样万一没真的发出去,至少不会把旧商品删掉却什么
+        // 新的都没有。
+        steps.push('确认发布是否真的成功');
+        const newItemInfo = await waitFor(() => {
+          const info = captureNewItemId();
+          return info.newItemId ? info : null;
+        }, { timeout: 8000 });
+
+        if (!newItemInfo) {
+          throw new Error(
+            `已经点击了「发布」按钮,但等了几秒网址还是没有跳转到新商品自己的页面,不确定是不是真的发布成功了,请手动检查。诊断信息:${JSON.stringify(collectDiagnostics())}`
+          );
+        }
+        return { ok: true, published: true, steps, ...newItemInfo };
       }
 
       return { ok: true, published: false, steps };
