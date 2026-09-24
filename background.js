@@ -209,7 +209,19 @@ function wait(ms) {
 // 自动"体检"补全,不需要用户操心是不是"新导入的"。
 async function refreshListingIfIncomplete(listing) {
   const incomplete = !listing.category || !listing.condition || !(listing.photos && listing.photos.length);
-  if (!incomplete || !listing.sourceItemId) return listing;
+  if (!incomplete) return listing;
+
+  if (!listing.sourceItemId) {
+    // 没有 Facebook 真实商品编号,压根不知道去哪个网址重新读——这种商品当初
+    // 导入的时候大概率没弹出详情框、也没能从那一行本身拿到链接,只存下了标题/
+    // 价格。没法自动补全,得用户自己把这条删掉、直接去 Facebook 页面上重新点
+    // 一次这个商品(不是点"Re-post now"重试),才能重新抓到真实编号。
+    await appendLog({
+      level: 'error',
+      text: `「${listing.title}」缺类别/成色/图片,但这条记录没有关联到 Facebook 真实商品编号,没法自动重新读取——请在面板里把这条删掉,回到 Facebook 页面重新点一次这个商品(不是点"Re-post now"),让它重新抓一次真实编号和完整信息。`,
+    });
+    return listing;
+  }
 
   let tab;
   try {
