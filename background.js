@@ -201,8 +201,53 @@ function wait(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// 类别/成色/图片这几项如果是老早之前(比如插件某个旧版本、或者那次读取本身就
+// 失败)存下来的空值,单靠重新上架时手上这份旧数据肯定还是缺——不能指望用户
+// 每次都先手动把这条商品删掉、重新点选导入一次才能用上最新的读取逻辑。这里在
+// 真正开始填表发布之前,先检查一下这几项是不是不全,不全的话就用商品自己的
+// Facebook 编号悄悄重新读一遍最新详情再继续,商品数据自己会在每次重新上架前
+// 自动"体检"补全,不需要用户操心是不是"新导入的"。
+async function refreshListingIfIncomplete(listing) {
+  const incomplete = !listing.category || !listing.condition || !(listing.photos && listing.photos.length);
+  if (!incomplete || !listing.sourceItemId) return listing;
+
+  let tab;
+  try {
+    tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${listing.sourceItemId}/`, active: false });
+    await waitForContentReady(tab.id, 20000);
+    const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
+    if (!res || !res.ok) {
+      await appendLog({
+        level: 'error',
+        text: `重新上架前刷新「${listing.title}」详情失败,先用已有数据继续尝试: ${(res && res.error) || '读取失败'}`,
+      });
+      return listing;
+    }
+    const scraped = res.listing;
+    const updates = {
+      category: scraped.category || listing.category,
+      condition: scraped.condition || listing.condition,
+      description: scraped.description || listing.description,
+      photos: scraped.photos && scraped.photos.length ? scraped.photos : listing.photos,
+      categoryConditionDiag: scraped.categoryConditionDiag || null,
+    };
+    await setListingFields(listing.id, updates);
+    await appendLog({ level: 'info', text: `重新上架前已刷新「${listing.title}」的详情` });
+    return { ...listing, ...updates };
+  } catch (err) {
+    await appendLog({
+      level: 'error',
+      text: `重新上架前刷新「${listing.title}」详情出错,先用已有数据继续尝试: ${(err && err.message) || err}`,
+    });
+    return listing;
+  } finally {
+    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+  }
+}
+
 async function processListing(listing) {
   await setListingFields(listing.id, { status: 'running' });
+  listing = await refreshListingIfIncomplete(listing);
   const settings = await getSettings();
   const oldItemId = listing.sourceItemId || null;
   let tab;
