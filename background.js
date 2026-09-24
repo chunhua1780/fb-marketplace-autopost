@@ -293,6 +293,7 @@ async function queueDetailRead(itemId, quickInfo) {
       genListing({
         title: quickInfo.title || '',
         price: quickInfo.priceText || '',
+        thumbUrl: quickInfo.thumbUrl || '',
         sourceItemId: itemId,
         sourceUrl: `https://www.facebook.com/marketplace/item/${itemId}/`,
         status: 'reading_details',
@@ -437,6 +438,7 @@ async function saveBasicListing(itemId, quickInfo) {
   const saved = genListing({
     title: quickInfo.title || '',
     price: quickInfo.priceText || '',
+    thumbUrl: quickInfo.thumbUrl || '',
     sourceItemId: itemId || null,
     sourceUrl: itemId ? `https://www.facebook.com/marketplace/item/${itemId}/` : null,
     status: 'imported',

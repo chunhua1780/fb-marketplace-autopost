@@ -21,14 +21,7 @@
 
   <section id="import-section">
     <h2 data-i18n="importH2">① Select my existing listings</h2>
-    <p class="hint" data-i18n="importHint">
-      First open your own Facebook "Marketplace → Your listings / Selling" page in the browser and keep it as your
-      current tab. Click "Start selecting" then go back to that page — hovering over one of your listings shows a
-      blue highlight; click it and it's selected instantly (nothing pops up, nothing blocks the screen), so you can
-      click through many in a row. Each click shows up right away in the "Listing queue" below, and the full details
-      (category/condition/description/photos) get filled in automatically in the background. You can close this
-      panel — selection mode stays on and resumes automatically when you reopen it.
-    </p>
+    <p class="hint" data-i18n="importHint">Click Start, then click your listings on Facebook — each one gets selected and read automatically.</p>
     <div id="import-status" class="hint"></div>
     <div class="row">
       <button id="start-select-btn" data-i18n="startSelectBtn">Start selecting</button>
@@ -39,158 +32,157 @@
 
   <section id="list-section">
     <h2 data-i18n="listH2">② Listing queue (auto re-post)</h2>
-    <p class="hint" data-i18n="listHint">
-      Imported listings automatically enter the "auto re-post when due" cycle — after a randomized delay, the old
-      version gets deleted and a fresh one posted so it always looks newest, with no manual adjustment needed.
-      Whether the old version also gets deleted is controlled by a master switch below in "Posting settings"
-      (on by default).
-    </p>
+    <p class="hint" data-i18n="listHint">Selected items automatically re-post on a randomized schedule (old deleted, new posted).</p>
     <ul id="listing-list"></ul>
   </section>
 
-  <section id="filestore-section">
-    <h2 data-i18n="filestoreH2">Local folder mirror</h2>
-    <p class="hint" data-i18n="filestoreHint">
-      Optional: pick a folder on your computer once, and every imported item's info and photos will automatically
-      be mirrored there in the background (one subfolder per item) — you can browse it directly in your file
-      manager. This is just a convenience copy; the extension itself keeps working from its own storage even if
-      this isn't set up or access lapses.
-    </p>
-    <div id="filestore-status" class="hint"></div>
-    <div class="row">
-      <button id="pick-folder-btn" data-i18n="pickFolderBtn">Choose save folder</button>
-      <button id="clear-folder-btn" class="secondary" data-i18n="clearFolderBtn">Clear</button>
-    </div>
-  </section>
+  <details id="advanced-section">
+    <summary data-i18n="advancedSummary">More settings (folder mirror, posting rules, auto-reply, FAQ, manual add)</summary>
 
-  <section id="settings-section">
-    <h2 data-i18n="settingsH2">Posting settings</h2>
-    <label><span data-i18n="sMinLabel">Minimum interval per item (seconds)</span>
-      <input type="number" id="s-min" min="30" />
-    </label>
-    <label><span data-i18n="sMaxLabel">Maximum interval per item (seconds)</span>
-      <input type="number" id="s-max" min="30" />
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="s-autopublish" />
-      <span data-i18n="sAutopublishLabel">Auto-click "Publish" (unchecked = auto-fill only, you confirm publish manually — safer)</span>
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="s-auto-delete-old" />
-      <span data-i18n="sAutoDeleteLabel">Auto-delete the old version on Facebook when re-posting (⚠️ irreversible, on by default; turning it off still auto re-posts, it just won't delete the old version)</span>
-    </label>
-    <button id="save-settings-btn" data-i18n="saveSettingsBtn">Save posting settings</button>
-  </section>
+    <section id="filestore-section">
+      <h2 data-i18n="filestoreH2">Local folder mirror</h2>
+      <p class="hint" data-i18n="filestoreHint">
+        Optional: pick a folder on your computer once, and every imported item's info and photos will automatically
+        be mirrored there in the background (one subfolder per item) — you can browse it directly in your file
+        manager. This is just a convenience copy; the extension itself keeps working from its own storage even if
+        this isn't set up or access lapses.
+      </p>
+      <div id="filestore-status" class="hint"></div>
+      <div class="row">
+        <button id="pick-folder-btn" data-i18n="pickFolderBtn">Choose save folder</button>
+        <button id="clear-folder-btn" class="secondary" data-i18n="clearFolderBtn">Clear</button>
+      </div>
+    </section>
 
-  <section id="seller-section">
-    <h2 data-i18n="sellerH2">Seller info (used for auto-replies)</h2>
-    <label><span data-i18n="sAddressLabel">Pickup / meetup address</span>
-      <textarea id="s-address" rows="2" data-i18n-placeholder="sAddressPlaceholder" placeholder="e.g. San Francisco, CA area, by appointment"></textarea>
-    </label>
-    <label><span data-i18n="sPurchaseLabel">Payment methods</span>
-      <textarea id="s-purchase" rows="2" data-i18n-placeholder="sPurchasePlaceholder" placeholder="e.g. Cash / Zelle / Venmo, in person"></textarea>
-    </label>
-    <button id="save-seller-btn" data-i18n="saveSellerBtn">Save seller info</button>
-  </section>
+    <section id="settings-section">
+      <h2 data-i18n="settingsH2">Posting settings</h2>
+      <label><span data-i18n="sMinLabel">Minimum interval per item (seconds)</span>
+        <input type="number" id="s-min" min="30" />
+      </label>
+      <label><span data-i18n="sMaxLabel">Maximum interval per item (seconds)</span>
+        <input type="number" id="s-max" min="30" />
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="s-autopublish" />
+        <span data-i18n="sAutopublishLabel">Auto-click "Publish" (unchecked = auto-fill only, you confirm publish manually — safer)</span>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="s-auto-delete-old" />
+        <span data-i18n="sAutoDeleteLabel">Auto-delete the old version on Facebook when re-posting (⚠️ irreversible, on by default; turning it off still auto re-posts, it just won't delete the old version)</span>
+      </label>
+      <button id="save-settings-btn" data-i18n="saveSettingsBtn">Save posting settings</button>
+    </section>
 
-  <section id="autoreply-section">
-    <h2 data-i18n="autoreplyH2">Auto-reply (inquiry bot)</h2>
-    <p class="hint" data-i18n="autoreplyHint">
-      Defaults to "dry run" mode: only shows what it would reply in the log below, without actually sending
-      anything. Recommended to watch it for a while before turning dry run off.
-    </p>
-    <label class="checkbox">
-      <input type="checkbox" id="ar-enabled" />
-      <span data-i18n="arEnabledLabel">Enable auto-reply</span>
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="ar-dryrun" />
-      <span data-i18n="arDryrunLabel">Dry run (log only, don't actually send)</span>
-    </label>
-    <label><span data-i18n="arMaxPerDayLabel">Max auto-replies per day</span>
-      <input type="number" id="ar-max-per-day" min="1" />
-    </label>
-    <label><span data-i18n="arCooldownLabel">Min seconds between replies in the same thread</span>
-      <input type="number" id="ar-cooldown" min="5" />
-    </label>
-    <label class="checkbox">
-      <input type="checkbox" id="ar-ai-enabled" />
-      <span data-i18n="arAiEnabledLabel">Use AI when no FAQ rule matches (requires your own Anthropic API key)</span>
-    </label>
-    <label><span data-i18n="arAiKeyLabel">Anthropic API Key</span>
-      <input type="password" id="ar-ai-key" placeholder="sk-ant-..." autocomplete="off" />
-    </label>
-    <label><span data-i18n="arAiModelLabel">AI model</span>
-      <input type="text" id="ar-ai-model" placeholder="claude-haiku-4-5" />
-    </label>
-    <button id="save-autoreply-btn" data-i18n="saveAutoreplyBtn">Save auto-reply settings</button>
-  </section>
+    <section id="seller-section">
+      <h2 data-i18n="sellerH2">Seller info (used for auto-replies)</h2>
+      <label><span data-i18n="sAddressLabel">Pickup / meetup address</span>
+        <textarea id="s-address" rows="2" data-i18n-placeholder="sAddressPlaceholder" placeholder="e.g. San Francisco, CA area, by appointment"></textarea>
+      </label>
+      <label><span data-i18n="sPurchaseLabel">Payment methods</span>
+        <textarea id="s-purchase" rows="2" data-i18n-placeholder="sPurchasePlaceholder" placeholder="e.g. Cash / Zelle / Venmo, in person"></textarea>
+      </label>
+      <button id="save-seller-btn" data-i18n="saveSellerBtn">Save seller info</button>
+    </section>
 
-  <section id="faq-section">
-    <h2 data-i18n="faqH2">FAQ scripts (matched by keyword)</h2>
-    <p class="hint">
-      Available variables: {{title}} {{price}} {{condition}} {{description}} {{address}} {{purchase}}
-    </p>
-    <ul id="faq-list"></ul>
-    <div class="row">
-      <input type="text" id="faq-keywords" data-i18n-placeholder="faqKeywordsPlaceholder" placeholder="Keywords, comma separated" />
-    </div>
-    <div class="row">
-      <input type="text" id="faq-answer" data-i18n-placeholder="faqAnswerPlaceholder" placeholder="Reply script, can use the variables above" />
-    </div>
-    <button id="faq-add-btn" data-i18n="faqAddBtn">Add script</button>
-  </section>
+    <section id="autoreply-section">
+      <h2 data-i18n="autoreplyH2">Auto-reply (inquiry bot)</h2>
+      <p class="hint" data-i18n="autoreplyHint">
+        Defaults to "dry run" mode: only shows what it would reply in the log below, without actually sending
+        anything. Recommended to watch it for a while before turning dry run off.
+      </p>
+      <label class="checkbox">
+        <input type="checkbox" id="ar-enabled" />
+        <span data-i18n="arEnabledLabel">Enable auto-reply</span>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="ar-dryrun" />
+        <span data-i18n="arDryrunLabel">Dry run (log only, don't actually send)</span>
+      </label>
+      <label><span data-i18n="arMaxPerDayLabel">Max auto-replies per day</span>
+        <input type="number" id="ar-max-per-day" min="1" />
+      </label>
+      <label><span data-i18n="arCooldownLabel">Min seconds between replies in the same thread</span>
+        <input type="number" id="ar-cooldown" min="5" />
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" id="ar-ai-enabled" />
+        <span data-i18n="arAiEnabledLabel">Use AI when no FAQ rule matches (requires your own Anthropic API key)</span>
+      </label>
+      <label><span data-i18n="arAiKeyLabel">Anthropic API Key</span>
+        <input type="password" id="ar-ai-key" placeholder="sk-ant-..." autocomplete="off" />
+      </label>
+      <label><span data-i18n="arAiModelLabel">AI model</span>
+        <input type="text" id="ar-ai-model" placeholder="claude-haiku-4-5" />
+      </label>
+      <button id="save-autoreply-btn" data-i18n="saveAutoreplyBtn">Save auto-reply settings</button>
+    </section>
 
-  <section id="run-section">
-    <h2 data-i18n="runH2">Publish queue</h2>
-    <div class="row">
-      <button id="start-btn" data-i18n="startBtn">Start publish queue</button>
-      <button id="stop-btn" class="secondary" data-i18n="stopBtn">Stop</button>
-    </div>
-    <div id="log"></div>
-  </section>
+    <section id="faq-section">
+      <h2 data-i18n="faqH2">FAQ scripts (matched by keyword)</h2>
+      <p class="hint">
+        Available variables: {{title}} {{price}} {{condition}} {{description}} {{address}} {{purchase}}
+      </p>
+      <ul id="faq-list"></ul>
+      <div class="row">
+        <input type="text" id="faq-keywords" data-i18n-placeholder="faqKeywordsPlaceholder" placeholder="Keywords, comma separated" />
+      </div>
+      <div class="row">
+        <input type="text" id="faq-answer" data-i18n-placeholder="faqAnswerPlaceholder" placeholder="Reply script, can use the variables above" />
+      </div>
+      <button id="faq-add-btn" data-i18n="faqAddBtn">Add script</button>
+    </section>
 
-  <section id="form-section">
-    <h2 id="form-title" data-i18n="formTitleAdd">Manually add an item (rarely used, kept last)</h2>
-    <input type="hidden" id="editing-id" />
-    <label><span data-i18n="fTitleLabel">Title</span>
-      <input type="text" id="f-title" data-i18n-placeholder="fTitlePlaceholder" placeholder="e.g. Solid wood dining table, seats 4" />
-    </label>
-    <label><span data-i18n="fPriceLabel">Price</span>
-      <input type="text" id="f-price" data-i18n-placeholder="fPricePlaceholder" placeholder="e.g. 1200" />
-    </label>
-    <label><span data-i18n="fCategoryLabel">Category (must exactly match the name shown on Facebook)</span>
-      <input type="text" id="f-category" placeholder="e.g. Furniture" />
-    </label>
-    <label><span data-i18n="fConditionLabel">Condition</span>
-      <input type="text" id="f-condition" placeholder="e.g. Used - Good" />
-    </label>
-    <label><span data-i18n="fLocationLabel">Location</span>
-      <input type="text" id="f-location" placeholder="e.g. San Francisco, CA" />
-    </label>
-    <label><span data-i18n="fDescriptionLabel">Description</span>
-      <textarea id="f-description" rows="4" data-i18n-placeholder="fDescriptionPlaceholder" placeholder="Item description..."></textarea>
-    </label>
-    <label><span data-i18n="fPhotosLabel">Photos</span>
-      <input type="file" id="f-photos" accept="image/*" multiple />
-    </label>
-    <div id="photo-preview"></div>
-    <label class="checkbox">
-      <input type="checkbox" id="f-repost-enabled" />
-      <span data-i18n="fRepostEnabledLabel">Auto re-post when due (keeps the listing ranked higher)</span>
-    </label>
-    <label id="f-repost-days-wrap" hidden><span data-i18n="fRepostDaysLabel">Interval (days)</span>
-      <input type="number" id="f-repost-days" min="1" value="7" />
-    </label>
-    <label class="checkbox" id="f-delete-old-wrap" hidden>
-      <input type="checkbox" id="f-delete-old" />
-      <span data-i18n="fDeleteOldLabel">Auto-delete the old version on Facebook after a successful re-post (⚠️ irreversible, also needs the master switch above in "Posting settings" turned on)</span>
-    </label>
-    <div class="row">
-      <button id="save-btn" data-i18n="saveBtn">Save item</button>
-      <button id="cancel-edit-btn" class="secondary" hidden data-i18n="cancelEditBtn">Cancel edit</button>
-    </div>
-  </section>
+    <section id="run-section">
+      <h2 data-i18n="runH2">Publish queue</h2>
+      <div class="row">
+        <button id="start-btn" data-i18n="startBtn">Start publish queue</button>
+        <button id="stop-btn" class="secondary" data-i18n="stopBtn">Stop</button>
+      </div>
+      <div id="log"></div>
+    </section>
+
+    <section id="form-section">
+      <h2 id="form-title" data-i18n="formTitleAdd">Manually add an item (rarely used, kept last)</h2>
+      <input type="hidden" id="editing-id" />
+      <label><span data-i18n="fTitleLabel">Title</span>
+        <input type="text" id="f-title" data-i18n-placeholder="fTitlePlaceholder" placeholder="e.g. Solid wood dining table, seats 4" />
+      </label>
+      <label><span data-i18n="fPriceLabel">Price</span>
+        <input type="text" id="f-price" data-i18n-placeholder="fPricePlaceholder" placeholder="e.g. 1200" />
+      </label>
+      <label><span data-i18n="fCategoryLabel">Category (must exactly match the name shown on Facebook)</span>
+        <input type="text" id="f-category" placeholder="e.g. Furniture" />
+      </label>
+      <label><span data-i18n="fConditionLabel">Condition</span>
+        <input type="text" id="f-condition" placeholder="e.g. Used - Good" />
+      </label>
+      <label><span data-i18n="fLocationLabel">Location</span>
+        <input type="text" id="f-location" placeholder="e.g. San Francisco, CA" />
+      </label>
+      <label><span data-i18n="fDescriptionLabel">Description</span>
+        <textarea id="f-description" rows="4" data-i18n-placeholder="fDescriptionPlaceholder" placeholder="Item description..."></textarea>
+      </label>
+      <label><span data-i18n="fPhotosLabel">Photos</span>
+        <input type="file" id="f-photos" accept="image/*" multiple />
+      </label>
+      <div id="photo-preview"></div>
+      <label class="checkbox">
+        <input type="checkbox" id="f-repost-enabled" />
+        <span data-i18n="fRepostEnabledLabel">Auto re-post when due (keeps the listing ranked higher)</span>
+      </label>
+      <label id="f-repost-days-wrap" hidden><span data-i18n="fRepostDaysLabel">Interval (days)</span>
+        <input type="number" id="f-repost-days" min="1" value="7" />
+      </label>
+      <label class="checkbox" id="f-delete-old-wrap" hidden>
+        <input type="checkbox" id="f-delete-old" />
+        <span data-i18n="fDeleteOldLabel">Auto-delete the old version on Facebook after a successful re-post (⚠️ irreversible, also needs the master switch above in "Posting settings" turned on)</span>
+      </label>
+      <div class="row">
+        <button id="save-btn" data-i18n="saveBtn">Save item</button>
+        <button id="cancel-edit-btn" class="secondary" hidden data-i18n="cancelEditBtn">Cancel edit</button>
+      </div>
+    </section>
+  </details>
 
   <script src="storage.js"></script>
   <script src="filestore.js"></script>

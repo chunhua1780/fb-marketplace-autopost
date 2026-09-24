@@ -227,11 +227,18 @@ async function renderList() {
   listings.forEach((l, i) => {
     const li = document.createElement('li');
     li.className = 'listing-item status-' + l.status;
+    // 缩略图优先用已经下载好的第一张图(数据在本地,不会因为图挂了就空着);
+    // 还没下载完的话,先用秒选那一刻从 Facebook 页面上抓到的缩略图链接顶一下,
+    // 让用户点了 1、2、3、4 个商品之后马上就能在列表里看到分别是哪个东西。
+    const thumbSrc = (l.photos && l.photos[0] && l.photos[0].dataUrl) || l.thumbUrl || '';
     li.innerHTML = `
       <div class="listing-main">
-        <strong>#${i + 1} ${escapeHtml(l.title)}</strong>
-        <span class="price">${escapeHtml(l.price || '')}</span>
-        <span class="status">${t(STATUS_KEY[l.status] || l.status)}</span>
+        ${thumbSrc ? `<img class="thumb" src="${escapeHtml(thumbSrc)}" alt="" />` : '<div class="thumb thumb-empty"></div>'}
+        <div class="listing-text">
+          <strong>#${i + 1} ${escapeHtml(l.title)}</strong>
+          <span class="price">${escapeHtml(l.price || '')}</span>
+          <span class="status">${t(STATUS_KEY[l.status] || l.status)}</span>
+        </div>
       </div>
       ${
         l.sourceItemId
@@ -252,6 +259,8 @@ async function renderList() {
     li.querySelector('[data-action="edit"]').addEventListener('click', () => editListing(l.id));
     li.querySelector('[data-action="retry"]').addEventListener('click', () => resetStatus(l.id));
     li.querySelector('[data-action="delete"]').addEventListener('click', () => deleteListing(l.id));
+    const thumbImg = li.querySelector('img.thumb');
+    if (thumbImg) thumbImg.addEventListener('error', () => thumbImg.remove(), { once: true });
     els.list.appendChild(li);
   });
 }
@@ -490,6 +499,20 @@ els.uiLang.addEventListener('change', async () => {
   await setLang(els.uiLang.value);
   applyStaticTranslations();
   await renderAllDynamic();
+});
+
+// 侧边栏不会自己跟着"当前标签页切换了"这件事重新判断连接状态——之前只在
+// 面板刚打开那一刻检测一次,用户如果是先开着面板、再切到/刷新 Facebook 那个
+// 标签页,面板显示的还是刚打开时的旧状态,必须关掉面板重开才会刷新,体验上
+// 就像是"必须关闭网页/插件重新打开才能选产品"。这里监听标签页切换/刷新/网址
+// 变化,自动重新检测,不需要用户手动关开面板。
+chrome.tabs.onActivated.addListener(() => {
+  safeRun('current tab', detectCurrentTab);
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'complete' || changeInfo.url) {
+    safeRun('current tab', detectCurrentTab);
+  }
 });
 
 (async function init() {

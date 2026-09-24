@@ -9,23 +9,14 @@ const I18N = {
     langLabel: 'Language',
 
     importH2: '① Select my existing listings',
-    importHint:
-      'First open your own Facebook "Marketplace → Your listings / Selling" page in the browser and keep it as ' +
-      'your current tab. Click "Start selecting" then go back to that page — hovering over one of your listings ' +
-      'shows a blue highlight; click it and it\'s selected instantly (nothing pops up, nothing blocks the screen), ' +
-      'so you can click through many in a row. Each click shows up right away in the "Listing queue" below, and ' +
-      'the full details (category/condition/description/photos) get filled in automatically in the background. ' +
-      'You can close this panel — selection mode stays on and resumes automatically when you reopen it.',
+    importHint: 'Click Start, then click your listings on Facebook — each one gets selected and read automatically.',
     startSelectBtn: 'Start selecting',
     stopSelectBtn: 'Stop selecting',
 
     listH2: '② Listing queue (auto re-post)',
-    listHint:
-      'Imported listings automatically enter the "auto re-post when due" cycle — after a randomized delay, the ' +
-      'old version gets deleted and a fresh one posted so it always looks newest, with no manual adjustment ' +
-      'needed. Whether the old version also gets deleted is controlled by a master switch below in "Posting ' +
-      'settings" (on by default).',
-    listEmpty: 'No items yet — use "Start selecting" above to import some, or manually add one at the bottom of the panel.',
+    listHint: 'Selected items automatically re-post on a randomized schedule (old deleted, new posted).',
+    listEmpty: 'No items yet — click "Start selecting" above and click your listings on Facebook.',
+    advancedSummary: 'More settings (folder mirror, posting rules, auto-reply, FAQ, manual add)',
 
     filestoreH2: 'Local folder mirror',
     filestoreHint:
@@ -143,20 +134,14 @@ const I18N = {
     langLabel: '语言',
 
     importH2: '① 点选我已有的商品',
-    importHint:
-      '先在浏览器里打开你自己 Facebook 的「Marketplace → 我的商品/正在出售」页面,保持它是你当前正在看的这个标签' +
-      '页。点「开始点选商品」后回到那个页面,把鼠标移到你自己的商品上会出现蓝色高亮框,点一下就会立刻选中(不会' +
-      '弹出任何东西、不挡屏幕),可以连续点很多个;每点一个,下面的「商品队列」里会马上出现这一条,后台会自动把' +
-      '完整信息(类别/成色/描述/图片)读完补上。这个面板可以关掉没关系,点选状态会保留,重开面板会自动恢复。',
+    importHint: '点「开始点选」,然后去 Facebook 页面点你的商品——会自动选中并读取信息。',
     startSelectBtn: '开始点选商品',
     stopSelectBtn: '停止点选',
 
     listH2: '② 商品队列(自动重新上架)',
-    listHint:
-      '点选导入的商品会自动进入「到期自动重新上架」循环——过一段随机的时间就会自动把这条商品删掉旧的、发一个新' +
-      '的上去,保持它显示成最新,不用再手动调节。要不要连旧版本一起自动删除,在下面「发布设置」里有一个总开关' +
-      '(默认开启)。',
-    listEmpty: '还没有商品——可以在上面「开始点选商品」导入,或者在面板最下面手动新增一个',
+    listHint: '选中的商品会按随机时间自动重新上架(删旧发新)。',
+    listEmpty: '还没有商品——点上面「开始点选商品」,然后去 Facebook 页面点你的商品',
+    advancedSummary: '更多设置(本地文件夹、发布规则、自动回复、常见问题、手动新增)',
 
     filestoreH2: '本地文件夹镜像',
     filestoreHint:
