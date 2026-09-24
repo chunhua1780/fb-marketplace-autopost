@@ -207,20 +207,22 @@ function wait(ms) {
 // 真正开始填表发布之前,先检查一下这几项是不是不全,不全的话就用商品自己的
 // Facebook 编号悄悄重新读一遍最新详情再继续,商品数据自己会在每次重新上架前
 // 自动"体检"补全,不需要用户操心是不是"新导入的"。
+// 返回 { listing, blockedReason }——blockedReason 不是 null 就说明已经确定
+// 这次没法往下走,让 processListing 直接在这里就把清楚的原因写到这条商品自己
+// 的失败提示上,不用再白跑一趟"打开发布页、填表、发现按钮点不动"才失败,面板
+// 里看到的也是真正卡住的原因,不是"找不到发布按钮"这种隔了一层的下游症状。
 async function refreshListingIfIncomplete(listing) {
   const incomplete = !listing.category || !listing.condition || !(listing.photos && listing.photos.length);
-  if (!incomplete) return listing;
+  if (!incomplete) return { listing, blockedReason: null };
 
   if (!listing.sourceItemId) {
     // 没有 Facebook 真实商品编号,压根不知道去哪个网址重新读——这种商品当初
     // 导入的时候大概率没弹出详情框、也没能从那一行本身拿到链接,只存下了标题/
     // 价格。没法自动补全,得用户自己把这条删掉、直接去 Facebook 页面上重新点
     // 一次这个商品(不是点"Re-post now"重试),才能重新抓到真实编号。
-    await appendLog({
-      level: 'error',
-      text: `「${listing.title}」缺类别/成色/图片,但这条记录没有关联到 Facebook 真实商品编号,没法自动重新读取——请在面板里把这条删掉,回到 Facebook 页面重新点一次这个商品(不是点"Re-post now"),让它重新抓一次真实编号和完整信息。`,
-    });
-    return listing;
+    const reason =
+      '缺类别/成色/图片,这条记录没有关联到 Facebook 真实商品编号,没法自动重新读取——请把这条删掉,回到 Facebook 页面重新点一次这个商品(不是点"Re-post now"重试),让它重新抓一次真实编号和完整信息。';
+    return { listing, blockedReason: reason };
   }
 
   let tab;
@@ -229,11 +231,10 @@ async function refreshListingIfIncomplete(listing) {
     await waitForContentReady(tab.id, 30000);
     const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
     if (!res || !res.ok) {
-      await appendLog({
-        level: 'error',
-        text: `重新上架前刷新「${listing.title}」详情失败,先用已有数据继续尝试: ${(res && res.error) || '读取失败'}`,
-      });
-      return listing;
+      return {
+        listing,
+        blockedReason: `重新上架前重新读取详情失败,没能补全类别/成色/图片: ${(res && res.error) || '读取失败'}`,
+      };
     }
     const scraped = res.listing;
     const updates = {
@@ -244,14 +245,31 @@ async function refreshListingIfIncomplete(listing) {
       categoryConditionDiag: scraped.categoryConditionDiag || null,
     };
     await setListingFields(listing.id, updates);
+    const refreshed = { ...listing, ...updates };
+    const stillIncomplete = !refreshed.category || !refreshed.condition || !(refreshed.photos && refreshed.photos.length);
+    if (stillIncomplete) {
+      const missing = [
+        !refreshed.category && '类别',
+        !refreshed.condition && '成色',
+        !(refreshed.photos && refreshed.photos.length) && '图片',
+      ]
+        .filter(Boolean)
+        .join('、');
+      const diagTrail = refreshed.categoryConditionDiag
+        ? ` 页面上找到的候选按钮文字:${JSON.stringify(refreshed.categoryConditionDiag)}`
+        : '';
+      return {
+        listing: refreshed,
+        blockedReason: `重新读取了 Facebook 上的原始商品页面,但还是没能读到「${missing}」,Facebook 要求这些字段填好才会解锁发布按钮,需要手动检查一下这个商品在 Facebook 上的这几项。${diagTrail}`,
+      };
+    }
     await appendLog({ level: 'info', text: `重新上架前已刷新「${listing.title}」的详情` });
-    return { ...listing, ...updates };
+    return { listing: refreshed, blockedReason: null };
   } catch (err) {
-    await appendLog({
-      level: 'error',
-      text: `重新上架前刷新「${listing.title}」详情出错,先用已有数据继续尝试: ${(err && err.message) || err}`,
-    });
-    return listing;
+    return {
+      listing,
+      blockedReason: `重新上架前刷新详情出错,没能补全类别/成色/图片: ${(err && err.message) || err}`,
+    };
   } finally {
     // 之前这里没有 await,标签页可能还没真的关掉,处理下一步(打开发布页那个
     // 新标签页)就已经开始了——两个标签页短暂同时加载 Facebook,可能会让第二个
@@ -263,7 +281,13 @@ async function refreshListingIfIncomplete(listing) {
 
 async function processListing(listing) {
   await setListingFields(listing.id, { status: 'running' });
-  listing = await refreshListingIfIncomplete(listing);
+  const refreshResult = await refreshListingIfIncomplete(listing);
+  listing = refreshResult.listing;
+  if (refreshResult.blockedReason) {
+    await setListingFields(listing.id, { status: 'failed', lastError: refreshResult.blockedReason, lastRunAt: Date.now() });
+    await appendLog({ level: 'error', text: `「${listing.title}」处理失败: ${refreshResult.blockedReason}` });
+    return;
+  }
   const settings = await getSettings();
   const oldItemId = listing.sourceItemId || null;
   let tab;
