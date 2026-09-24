@@ -83,6 +83,9 @@ async function handleMessage(message, sender) {
     case 'REPOST_NOW':
       return repostNow(message.id);
 
+    case 'REPOST_ALL':
+      return repostAll();
+
     case 'CONTENT_READY': {
       const tabId = sender.tab && sender.tab.id;
       const resolver = tabId != null && pendingReadyResolvers.get(tabId);
@@ -172,6 +175,26 @@ async function repostNow(id) {
   await chrome.storage.local.set({ queueRunning: true });
   tick();
   return { ok: true };
+}
+
+// 一键把所有还没在排队/没在处理中的商品都丢进发布队列——队列本身已经有随机
+// 间隔(每个商品之间等 60-150 秒),不会一次性全部挤在一起发,不需要用户一个
+// 一个点「立即重新上架」。
+async function repostAll() {
+  const listings = await getListings();
+  let count = 0;
+  for (const l of listings) {
+    if (l.status === 'pending' || l.status === 'running') continue;
+    l.status = 'pending';
+    l.lastError = null;
+    count += 1;
+  }
+  if (!count) return { ok: true, count: 0 };
+  await saveListings(listings);
+  await appendLog({ level: 'info', text: `已把 ${count} 个商品放入队列,准备依次重新上架` });
+  await chrome.storage.local.set({ queueRunning: true });
+  tick();
+  return { ok: true, count };
 }
 
 function wait(ms) {

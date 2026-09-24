@@ -40,6 +40,7 @@ const els = {
   saveBtn: document.getElementById('save-btn'),
   cancelEditBtn: document.getElementById('cancel-edit-btn'),
   list: document.getElementById('listing-list'),
+  repostAllBtn: document.getElementById('repost-all-btn'),
 
   sMin: document.getElementById('s-min'),
   sMax: document.getElementById('s-max'),
@@ -216,6 +217,11 @@ async function repostNow(id) {
   const res = await chrome.runtime.sendMessage({ type: 'REPOST_NOW', id });
   if (!res || !res.ok) alert(t('alertRepostFail', { error: res && res.error }));
 }
+
+els.repostAllBtn.addEventListener('click', async () => {
+  const res = await chrome.runtime.sendMessage({ type: 'REPOST_ALL' });
+  if (!res || !res.ok) alert(t('alertRepostFail', { error: res && res.error }));
+});
 
 async function renderList() {
   const listings = await getListings();
