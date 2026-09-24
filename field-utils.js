@@ -186,28 +186,6 @@ async function ensureEditFormVisible() {
   return !!ready;
 }
 
-// 找一个「刚好包住这几个已知表单字段」的容器,用来把图片搜索范围收窄到这条
-// 商品自己的编辑区域——不这么做的话,图片搜索会跑到整个网页,把侧边栏「相关
-// 商品推荐」、导航栏头像之类别的商品的图也一起当成这条商品的照片抓下来,导致
-// 重新上架的商品带着不相关的图。已知字段有两个以上时,从其中一个往上爬,直到
-// 找到同时包住所有已知字段的祖先节点;只有一个字段时没法这样定位,退而求其次
-// 往上爬固定几层,大致等于整个表单区块的大小。
-function findFormRoot(elements) {
-  const els = elements.filter(Boolean);
-  if (els.length >= 2) {
-    let node = els[0].parentElement;
-    while (node && node !== document.body) {
-      if (els.every((el) => node.contains(el))) return node;
-      node = node.parentElement;
-    }
-  } else if (els.length === 1) {
-    let node = els[0];
-    for (let i = 0; i < 6 && node.parentElement; i++) node = node.parentElement;
-    return node;
-  }
-  return document;
-}
-
 // 读取「当前页面上正在显示的」商品编辑表单字段 + 图片。不管这个表单是整页的
 // 编辑页,还是弹窗里临时展开的编辑区,只要标题输入框已经出现在页面上,这个
 // 函数都能用——content-item.js(整页编辑)和 content-my-listings.js(弹窗内
@@ -223,11 +201,18 @@ async function scrapeVisibleListingForm() {
   const conditionEl = findFieldByLabel(FB_LABELS.condition) || findFieldByNearbyLabel(FB_LABELS.condition);
   const locationEl = findFieldByLabel(FB_LABELS.location);
 
-  const formRoot = findFormRoot([titleEl, priceEl, descEl, categoryEl, conditionEl, locationEl]);
-
+  // 之前图片搜索会先找一个「刚好包住已知表单字段」的容器再限定范围内搜——已知
+  // 字段经常只有标题/价格/描述三个能找到,算出来的范围因此缩得很小,反而把
+  // 图片网格整个排除在外(steps 记录里长期没出现过「上传照片」这一步,就是因为
+  // 读出来的 photos 一直是空的)。现在改成直接在整个页面里找,只排除顶部导航栏/
+  // 页头(之前"抓到别的商品的图"那个问题的真正来源),并且把最小尺寸从 80 提到
+  // 150——个人头像、图标这类小图基本都在 150 以下,真正上传的商品图片通常明显
+  // 更大,这样既不会因为范围缩太窄而漏掉图片,也不容易混进无关的小图标。
+  const isChromeEl = (el) => !!el.closest('header, nav, [role="navigation"], [role="banner"], aside, [role="complementary"]');
   const photos = [];
-  const imgs = Array.from(formRoot.querySelectorAll('img'))
-    .filter((img) => img.naturalWidth > 80 && img.naturalHeight > 80 && /^https?:/.test(img.src))
+  const imgs = Array.from(document.querySelectorAll('img'))
+    .filter((img) => !isChromeEl(img))
+    .filter((img) => img.naturalWidth > 150 && img.naturalHeight > 150 && /^https?:/.test(img.src))
     .slice(0, 20);
   for (const img of imgs) {
     try {
@@ -249,11 +234,15 @@ async function scrapeVisibleListingForm() {
   // 找字段这一套(findFieldByLabel)就完全找不到它,读出来就是空的。读不到的话
   // 顺手把表单区域里所有「看起来像下拉/按钮」的元素文字都列一份,方便定位到底
   // 类别控件长什么样、该怎么改。
+  // 这里也不用 formRoot——同样怕已知字段太少、范围算得太窄,把类别按钮本身
+  // 排除在外,连诊断信息里都看不到它,那就更没法排查了。跟图片一样只排除
+  // 顶部导航栏/页头,不缩到 formRoot 那么窄。
   let categoryConditionDiag = null;
   if (!category || !condition) {
     categoryConditionDiag = Array.from(
-      formRoot.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], div[role="button"], span[role="button"]')
+      document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], div[role="button"], span[role="button"]')
     )
+      .filter((el) => !isChromeEl(el))
       .map((el) => (el.getAttribute('aria-label') || el.textContent || '').trim())
       .filter(Boolean)
       .slice(0, 20);
