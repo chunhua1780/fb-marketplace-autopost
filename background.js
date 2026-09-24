@@ -212,7 +212,10 @@ function wait(ms) {
 // 的失败提示上,不用再白跑一趟"打开发布页、填表、发现按钮点不动"才失败,面板
 // 里看到的也是真正卡住的原因,不是"找不到发布按钮"这种隔了一层的下游症状。
 async function refreshListingIfIncomplete(listing) {
-  const incomplete = !listing.category || !listing.condition || !(listing.photos && listing.photos.length);
+  // 类别现在不用非得先知道具体是什么——重新上架填表的时候会尽力选一个类别
+  // 出来(选得准不准不重要,只要 Facebook 不会因为类别空着而不让发布就行),
+  // 所以这里不再因为类别读不到就判定「不全」,只看成色和图片。
+  const incomplete = !listing.condition || !(listing.photos && listing.photos.length);
   if (!incomplete) return { listing, blockedReason: null };
 
   if (!listing.sourceItemId) {
@@ -246,13 +249,9 @@ async function refreshListingIfIncomplete(listing) {
     };
     await setListingFields(listing.id, updates);
     const refreshed = { ...listing, ...updates };
-    const stillIncomplete = !refreshed.category || !refreshed.condition || !(refreshed.photos && refreshed.photos.length);
+    const stillIncomplete = !refreshed.condition || !(refreshed.photos && refreshed.photos.length);
     if (stillIncomplete) {
-      const missing = [
-        !refreshed.category && '类别',
-        !refreshed.condition && '成色',
-        !(refreshed.photos && refreshed.photos.length) && '图片',
-      ]
+      const missing = [!refreshed.condition && '成色', !(refreshed.photos && refreshed.photos.length) && '图片']
         .filter(Boolean)
         .join('、');
       const diagTrail = refreshed.categoryConditionDiag

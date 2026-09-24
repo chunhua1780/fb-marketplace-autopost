@@ -47,6 +47,42 @@
     await fbSleep(300);
   }
 
+  // 类别选得准不准不重要,重要的是必须选上——Facebook 要求这个字段非空才会
+  // 解锁发布按钮。类别选择器大概率点开后弹出的是一整棵分类树(选大类→再选
+  // 子类,可能还有第三层),不是一层列表,所以这里不要求精确匹配:能对上原来
+  // 读到的类别文字就优先选那个,对不上就直接选当前弹出的这一层里第一个选项;
+  // 选完如果又冒出下一层新的选项列表,就在新的这层里继续选第一个,最多试几层,
+  // 保证类别这一项最终有值、不是空的。
+  async function selectCategoryBestEffort(triggerCandidates, preferredText) {
+    const trigger = await waitFor(
+      () => findFieldByLabel(triggerCandidates) || findFieldByNearbyLabel(triggerCandidates) || findClickableByText(triggerCandidates)
+    );
+    if (!trigger) throw new Error('找不到「类别」对应的选择控件');
+    trigger.click();
+    await fbSleep(500);
+
+    let remainingPreferred = preferredText;
+    for (let level = 0; level < 4; level++) {
+      const options = await waitFor(() => {
+        const list = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], li')).filter(
+          (el) => el.offsetParent !== null
+        );
+        return list.length ? list : null;
+      }, { timeout: 2500 });
+      if (!options) break; // 没有新的选项列表弹出来了,说明这一层已经选到头
+
+      let pick = null;
+      if (remainingPreferred) {
+        pick = options.find((o) => fbNormalize(o.textContent).includes(fbNormalize(remainingPreferred)));
+      }
+      if (!pick) pick = options[0];
+      remainingPreferred = null; // 只在第一层尝试匹配原来的类别文字,子分类直接选第一个
+
+      pick.click();
+      await fbSleep(600);
+    }
+  }
+
   // 发布成功后 Facebook 通常会跳到新商品自己的页面,尝试从网址里读出新商品的 id,
   // 这样背景脚本以后就能精确地找到「这一次发布出来的新商品」(比如用来在下次
   // 重新上架时删除它,而不是删错别的商品)。读不到就返回 null,不影响其他功能。
@@ -80,19 +116,21 @@
       const priceEl = findFieldByLabel(FB_LABELS.price);
       if (priceEl) setNativeValue(priceEl, String(listing.price ?? ''));
 
-      // 类别/成色是下拉选择,要求新表单里的选项文字跟旧商品读到的完全一致才能
-      // 选中——版本、语言、Facebook 改过选项措辞都可能对不上。这两个字段选不中
-      // 只是让用户自己补选一下(几秒钟的事),不应该因为这个把标题/价格/描述/
-      // 图片这些已经填好的内容也一起作废、整个重新上架直接判失败。
-      if (listing.category) {
-        steps.push('选择类别');
-        try {
-          await selectFromDropdown(FB_LABELS.category, listing.category);
-        } catch (err) {
-          steps.push(`选择类别失败(已跳过,请手动选择「${listing.category}」): ${(err && err.message) || err}`);
-        }
+      // 类别用户明确说了选得准不准不重要,重要的是必须选上一个,不然 Facebook
+      // 不会解锁发布按钮——所以这里不管有没有从旧商品读到具体类别文字,都会
+      // 尝试把类别选择器点开、选一个选项(优先匹配读到的文字,匹配不到就选
+      // 弹出来的第一个),真选不上也只是跳过、让用户自己补一下,不应该因为这个
+      // 把标题/价格/描述/图片这些已经填好的内容也一起作废、整个判失败。
+      steps.push('选择类别');
+      try {
+        await selectCategoryBestEffort(FB_LABELS.category, listing.category);
+      } catch (err) {
+        steps.push(`选择类别失败(已跳过,请手动选择类别): ${(err && err.message) || err}`);
       }
 
+      // 成色跟类别不一样,选项通常就是一层(全新/二手-好/二手-一般这种),要求
+      // 新表单里的选项文字跟旧商品读到的完全一致才能选中——版本、语言、Facebook
+      // 改过措辞都可能对不上,选不中同样只是跳过、不影响其他字段。
       if (listing.condition) {
         steps.push('选择成色');
         try {
