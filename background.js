@@ -107,7 +107,7 @@ async function handleMessage(message, sender) {
   }
 }
 
-function waitForContentReady(tabId, timeoutMs = 20000) {
+function waitForContentReady(tabId, timeoutMs = 30000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingReadyResolvers.delete(tabId);
@@ -226,7 +226,7 @@ async function refreshListingIfIncomplete(listing) {
   let tab;
   try {
     tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${listing.sourceItemId}/`, active: false });
-    await waitForContentReady(tab.id, 20000);
+    await waitForContentReady(tab.id, 30000);
     const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
     if (!res || !res.ok) {
       await appendLog({
@@ -253,7 +253,11 @@ async function refreshListingIfIncomplete(listing) {
     });
     return listing;
   } finally {
-    if (tab) chrome.tabs.remove(tab.id).catch(() => {});
+    // 之前这里没有 await,标签页可能还没真的关掉,处理下一步(打开发布页那个
+    // 新标签页)就已经开始了——两个标签页短暂同时加载 Facebook,可能会让第二个
+    // 标签页的加载被拖慢,导致它自己的等待页面加载超时。改成等真的关掉了再往
+    // 下走,不会自己跟自己抢资源。
+    if (tab) await chrome.tabs.remove(tab.id).catch(() => {});
   }
 }
 
@@ -338,7 +342,7 @@ async function deleteOldListing(itemId, titleForLog) {
   let tab;
   try {
     tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${itemId}/`, active: false });
-    await waitForContentReady(tab.id, 20000);
+    await waitForContentReady(tab.id, 30000);
     const res = await chrome.tabs.sendMessage(tab.id, { type: 'DELETE_ITEM' });
     if (!res || !res.ok) throw new Error((res && res.error) || '删除失败');
     await appendLog({ level: 'success', text: `已自动删除「${titleForLog}」在 Facebook 上的旧版本` });
@@ -423,7 +427,7 @@ async function processDetailRead(item) {
   let tab;
   try {
     tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${itemId}/`, active: false });
-    await waitForContentReady(tab.id, 20000);
+    await waitForContentReady(tab.id, 30000);
     const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
     if (!res || !res.ok) throw new Error((res && res.error) || '读取详情失败');
     await saveScrapedListing(itemId, res.listing, quickInfo);
