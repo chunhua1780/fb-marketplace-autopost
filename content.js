@@ -22,7 +22,9 @@
 
   async function selectFromDropdown(triggerCandidates, optionText) {
     if (!optionText) return;
-    const trigger = await waitFor(() => findFieldByLabel(triggerCandidates) || findClickableByText(triggerCandidates));
+    const trigger = await waitFor(
+      () => findFieldByLabel(triggerCandidates) || findFieldByNearbyLabel(triggerCandidates) || findClickableByText(triggerCandidates)
+    );
     if (!trigger) throw new Error(`找不到「${optionText}」对应的选择控件`);
     trigger.click();
     await fbSleep(400);

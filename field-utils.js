@@ -65,6 +65,31 @@ function findFieldByLabel(candidates, root = document) {
   return null;
 }
 
+// findFieldByLabel 那一套全都是「控件自己的文字/aria-label 里带着字段名」这个
+// 假设——类别、成色这种字段在 Facebook 表单里经常不是这样:页面上有一个单独的
+// 小标题写着"Category",挨着它的是一个按钮,但按钮上显示的是「当前选中的值」
+// 本身(比如"Electronics & Computers"),不会带着"Category"这几个字,前面那
+// 一套自然什么都找不到。这里换一个思路:先找一个文字精确等于候选词、自己没有
+// 子元素的「纯标题节点」,再从它开始一层层往上爬,每层都找一下里面有没有可
+// 点击的控件(排除标题节点自己),找到的第一个就当作是这个标题对应的字段。
+function findFieldByNearbyLabel(candidates, root = document) {
+  const leafNodes = Array.from(root.querySelectorAll('span, div, label')).filter((el) => el.children.length === 0);
+  for (const labelEl of leafNodes) {
+    const text = fbNormalize(labelEl.textContent);
+    if (!text || !candidates.some((c) => text === fbNormalize(c))) continue;
+
+    let container = labelEl.parentElement;
+    for (let hop = 0; hop < 4 && container; hop++) {
+      const clickable = Array.from(
+        container.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], [aria-haspopup="menu"], div[role="button"], span[role="button"], button')
+      ).find((el) => el !== labelEl);
+      if (clickable) return clickable;
+      container = container.parentElement;
+    }
+  }
+  return null;
+}
+
 function findClickableByText(candidates, root = document) {
   const nodes = Array.from(
     root.querySelectorAll('div[role="button"], span[role="button"], button, a[role="button"], [role="menuitem"]')
@@ -191,8 +216,11 @@ async function scrapeVisibleListingForm() {
   const titleEl = findFieldByLabel(FB_LABELS.title);
   const priceEl = findFieldByLabel(FB_LABELS.price);
   const descEl = findFieldByLabel(FB_LABELS.description);
-  const categoryEl = findFieldByLabel(FB_LABELS.category);
-  const conditionEl = findFieldByLabel(FB_LABELS.condition);
+  // 类别/成色先按老办法找,找不到再退回「附近标题」这个办法——这两个字段在
+  // Facebook 表单里经常是「独立小标题 + 显示当前值的按钮」这种结构,按钮本身的
+  // 文字不带字段名,标准的按标签找字段这一套天生找不到。
+  const categoryEl = findFieldByLabel(FB_LABELS.category) || findFieldByNearbyLabel(FB_LABELS.category);
+  const conditionEl = findFieldByLabel(FB_LABELS.condition) || findFieldByNearbyLabel(FB_LABELS.condition);
   const locationEl = findFieldByLabel(FB_LABELS.location);
 
   const formRoot = findFormRoot([titleEl, priceEl, descEl, categoryEl, conditionEl, locationEl]);
