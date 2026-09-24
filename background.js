@@ -322,13 +322,15 @@ async function processListing(listing) {
       await deleteOldListing(oldItemId, listing.title);
     }
   } catch (err) {
-    // 类别/成色读不到这份诊断是导入那一刻存到商品身上的(见 saveScrapedListing)。
-    // 用户平时复制粘贴给我们看的都是这条"处理失败"日志,不是导入时候那条,
-    // 干脆把这份诊断也一起拼进来,不用非得抓准导入那一刻的日志才有用。
+    // 类别/成色读不到这份诊断是导入(或者重新上架前的自动刷新)那一刻存到商品
+    // 身上的——用户平时截图给我们看的都是这条「处理失败」日志的开头那一段,
+    // 后面那一大串 collectDiagnostics() 的原始 JSON 太长,日志框里要横向/纵向
+    // 滚动很久才能看到。把类别诊断挪到最前面、原始 JSON 挪到最后,这样只要
+    // 截到日志开头就一定看得到最关键的那部分,不用非得截全。
     const categoryDiagTrail = listing.categoryConditionDiag
-      ? ` | 类别/成色候选:${JSON.stringify(listing.categoryConditionDiag)}`
+      ? `类别/成色候选:${JSON.stringify(listing.categoryConditionDiag)} | `
       : '';
-    const fullError = String((err && err.message) || err) + categoryDiagTrail;
+    const fullError = categoryDiagTrail + String((err && err.message) || err);
     await setListingFields(listing.id, { status: 'failed', lastError: fullError, lastRunAt: Date.now() });
     await appendLog({ level: 'error', text: `「${listing.title}」处理失败: ${fullError}` });
   } finally {
