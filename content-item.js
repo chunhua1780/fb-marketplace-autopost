@@ -18,11 +18,16 @@
   // 自己用的原始文字,不是靠 DOM 猜的)。这里存一份按商品编号分类的缓存,
   // scrapeListingOnPage 读表单的同时,把这份网络抓到的数据也合并进去。
   const netCaptured = {};
+  let graphqlSeenCount = 0;
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const msg = event.data;
-    if (!msg || msg.source !== 'fbma-net-capture' || msg.type !== 'LISTING_DATA' || !msg.id) return;
-    netCaptured[msg.id] = msg.data;
+    if (!msg || msg.source !== 'fbma-net-capture') return;
+    if (msg.type === 'LISTING_DATA' && msg.id) {
+      netCaptured[msg.id] = msg.data;
+    } else if (msg.type === 'GRAPHQL_SEEN') {
+      graphqlSeenCount = msg.count;
+    }
   });
 
   function currentItemId() {
@@ -30,37 +35,90 @@
     return m ? m[1] : null;
   }
 
-  async function scrapeListingOnPage() {
-    const ready = await ensureEditFormVisible();
-    if (!ready) {
-      throw new Error(`没能展开完整的编辑表单,读取详情失败。诊断信息:${JSON.stringify(collectDiagnostics())}`);
+  async function downloadNetPhotos(net) {
+    if (!net || !net.photos || !net.photos.length) return [];
+    const downloaded = [];
+    for (const url of net.photos.slice(0, 20)) {
+      try {
+        const res = await fetch(url);
+        const blob = await res.blob();
+        const dataUrl = await blobToDataUrl(blob);
+        downloaded.push({ name: 'photo.jpg', dataUrl });
+      } catch (err) {
+        // 单张图片下载失败不影响其他图片,跳过即可
+      }
     }
-    const listing = await scrapeVisibleListingForm();
+    return downloaded;
+  }
 
-    // 网络抓取和页面渲染是并行发生的,打开页面时数据可能还没到——这里再等最多
-    // 2 秒,大多数情况下页面加载时已经发生过了,不会真的等满。
+  function titleFromPageTitle() {
+    // 兜底用:网页标签页标题通常是"Marketplace - 商品标题 | Facebook"这个格式
+    return (document.title || '').replace(/^Marketplace\s*-\s*/, '').replace(/\s*\|\s*Facebook\s*$/, '').trim();
+  }
+
+  async function scrapeListingOnPage() {
+    // 网络抓取和页面渲染是并行发生的,打开页面时数据可能还没到——先等最多 4
+    // 秒。之前的做法是先花好几秒去找/展开编辑表单,找不到就直接判定失败,
+    // 网络抓到的数据压根没机会用上——实测下来好几个真实商品自己的详情页上根本
+    // 没有"编辑"这个按钮(可能编辑功能本来就只在"你的商品"管理页里才有),
+    // 死等一个不存在的编辑表单只会白白浪费时间、最后仍然失败。现在反过来:
+    // 先看网络那边有没有抓到足够的数据,够用就直接用,不需要页面上真的展开
+    // 什么表单;网络数据不够的时候,才把 DOM 表单当成补充/兜底手段去试。
     const itemId = currentItemId();
     let net = itemId && netCaptured[itemId];
     if (!net && itemId) {
-      net = await waitFor(() => netCaptured[itemId], { timeout: 2000, interval: 200 });
+      net = await waitFor(() => netCaptured[itemId], { timeout: 4000, interval: 300 });
+    }
+
+    const netHasEnough = !!(net && net.condition && net.photos && net.photos.length);
+
+    let listing;
+    if (netHasEnough) {
+      listing = {
+        title: net.title || titleFromPageTitle(),
+        price: net.price || '',
+        description: net.description || '',
+        category: net.category || '',
+        condition: net.condition || '',
+        location: net.location || '',
+        photos: [],
+        categoryConditionDiag: null,
+      };
+    } else {
+      const ready = await ensureEditFormVisible();
+      if (!ready) {
+        if (!net) {
+          const netHint =
+            graphqlSeenCount > 0
+              ? `拦截到了 ${graphqlSeenCount} 次 GraphQL 响应,但没有一个长得像商品信息(可能是打分规则没认出来,不是拦截机制坏了)`
+              : '一次 GraphQL 响应都没拦截到(可能是这个 Chrome 版本不支持网络抓取这层机制,或者页面还没加载完就已经开始读取)';
+          throw new Error(`没能展开完整的编辑表单,网络那边也没抓到数据(${netHint}),读取详情彻底失败。诊断信息:${JSON.stringify(collectDiagnostics())}`);
+        }
+        // 编辑表单打不开,但网络那边好歹抓到了一部分,先用这部分凑合,总比
+        // 完全失败、连基本信息都没有要好。
+        listing = {
+          title: net.title || titleFromPageTitle(),
+          price: net.price || '',
+          description: net.description || '',
+          category: net.category || '',
+          condition: net.condition || '',
+          location: net.location || '',
+          photos: [],
+          categoryConditionDiag: null,
+        };
+      } else {
+        listing = await scrapeVisibleListingForm();
+      }
     }
 
     if (net) {
       // 图片：网络抓到的是 Facebook 自己存的原图直链,不用再从页面上的 <img>
       // 元素里按尺寸猜「这张是不是商品图」,直接下载这些直链就行,比 DOM 扫描
       // 更完整(不会漏掉懒加载还没渲染出来的图),也不会混进头像、图标这些无关图片。
-      if (net.photos && net.photos.length) {
-        const downloaded = [];
-        for (const url of net.photos.slice(0, 20)) {
-          try {
-            const res = await fetch(url);
-            const blob = await res.blob();
-            const dataUrl = await blobToDataUrl(blob);
-            downloaded.push({ name: 'photo.jpg', dataUrl });
-          } catch (err) {
-            // 单张图片下载失败不影响其他图片,跳过即可
-          }
-        }
+      // (只有 listing.photos 还是空的时候才用网络这份去填——上面 DOM 表单那条
+      // 分支自己已经读到图片时,不要用网络这份去覆盖。)
+      if (net.photos && net.photos.length && !(listing.photos && listing.photos.length)) {
+        const downloaded = await downloadNetPhotos(net);
         if (downloaded.length) listing.photos = downloaded;
       }
       // 成色是必填项,Facebook 表单里显示的文字必须跟重新上架时要选的选项完全

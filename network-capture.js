@@ -223,8 +223,19 @@
     }
   }
 
+  // 排查用的计数器:不管有没有真的抓到"像商品信息"的数据,只要拦到了一次
+  // /api/graphql/ 的响应就 +1、顺手广播一下当前计数。以后要是又出现"读取
+  // 详情彻底失败"这种情况,靠这个能马上分清楚是两种完全不同的问题:一种是
+  // 这个页面上根本没拦到任何 GraphQL 响应(说明这层拦截机制本身没生效,比如
+  // Chrome 版本太旧不支持 MAIN world 注入),另一种是拦到了不少响应、但没有
+  // 一个长得像商品信息(说明拦截机制本身是好的,只是这次的打分规则没認出来,
+  // 需要调整认的规则,而不是怀疑整个思路)——这两种问题的排查方向完全不同。
+  let graphqlSeenCount = 0;
+
   function handleResponseText(text) {
     if (!text || text.length < 20) return;
+    graphqlSeenCount += 1;
+    window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount }, '*');
     const fallbackId = currentItemIdFromUrl();
     const objs = parseMaybeMultiJson(text);
     const seen = new Set();
