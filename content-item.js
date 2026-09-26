@@ -94,7 +94,7 @@
   }
 
   async function deleteListingOnPage() {
-    const menuBtn = await waitFor(() => findClickableByText(['More', '更多选项', '更多']), { timeout: 8000 });
+    const menuBtn = await waitFor(() => findClickableByText(FB_LABELS.moreOptions), { timeout: 8000 });
     if (menuBtn) {
       menuBtn.click();
       await fbSleep(600);

@@ -19,6 +19,7 @@ if (typeof globalThis.FB_LABELS === 'undefined') {
     next: ['Next', '下一步'],
     publish: ['Publish', '发布', '發佈', '刊登'],
     editListing: ['Edit listing', 'Edit Listing', '编辑商品', '編輯商品', 'Edit'],
+    moreOptions: ['More', 'More options', '更多选项', '更多'],
   };
 }
 
@@ -177,7 +178,21 @@ async function ensureEditFormVisible() {
   let ready = await waitFor(() => findFieldByLabel(FB_LABELS.title), { timeout: 8000 });
   if (ready) return true;
 
-  const editBtn = await waitFor(() => findClickableByText(FB_LABELS.editListing), { timeout: 6000 });
+  let editBtn = await waitFor(() => findClickableByText(FB_LABELS.editListing), { timeout: 4000 });
+  if (!editBtn) {
+    // 自己商品的详情页里,「Edit listing」经常不是直接摆在页面上的,而是跟
+    // 「Delete listing」放在一起,藏在「More options / 更多选项」这个菜单按钮
+    // 点开以后才出现——删除功能那边(content-item.js 的 deleteListingOnPage)
+    // 已经证实过这个套路管用,这里补上同样先点一下菜单再找的步骤。之前没有
+    // 这一步,导致直接搜「Edit」在很多商品页上根本搜不到,誤判成"没能展开
+    // 编辑表单",其实只是没点开那个菜单。
+    const moreBtn = await waitFor(() => findClickableByText(FB_LABELS.moreOptions), { timeout: 4000 });
+    if (moreBtn) {
+      moreBtn.click();
+      await fbSleep(600);
+      editBtn = await waitFor(() => findClickableByText(FB_LABELS.editListing), { timeout: 4000 });
+    }
+  }
   if (editBtn) {
     editBtn.click();
     await fbSleep(1200);
