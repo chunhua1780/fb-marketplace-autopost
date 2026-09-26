@@ -86,7 +86,7 @@
         best = id;
       }
     });
-    return bestScore >= 0.5 ? best : null;
+    return bestScore >= 0.4 ? best : null;
   }
 
   // 点选的时候网络那边的数据不一定已经到位(页面可能还在加载),这里最多再
@@ -166,10 +166,28 @@
     return { title, priceText, thumbUrl: img ? img.src : '' };
   }
 
+  // 之前只在 findRowBoundary 算出来的那一层容器里找链接——"你的商品"管理页面
+  // 这种卡片布局,缩略图的链接有时候是跟标题/价格文字平级的兄弟节点,不一定
+  // 被包在 findRowBoundary 判定的那个边界"里面",单单在那一层容器内找,链接
+  // 明明存在却怎么也找不到。这里改成从这一行开始逐层往上找最多 4 层,只要某一
+  // 层里能找到"唯一一个"商品链接就直接用;一旦某一层里出现了两个或更多不同的
+  // 商品编号,说明已经找到了装着好几个商品的外层容器,没法再分清哪个才是本来
+  // 想要的这一行,直接放弃、不瞎猜。
   function extractItemId(el) {
-    const link = el.querySelector ? el.querySelector('a[href*="/marketplace/item/"]') : null;
-    const m = link && (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
-    return m ? m[1] : null;
+    let node = el;
+    for (let hops = 0; hops < 4 && node; hops++) {
+      if (node.querySelectorAll) {
+        const ids = new Set();
+        node.querySelectorAll('a[href*="/marketplace/item/"]').forEach((link) => {
+          const m = (link.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
+          if (m) ids.add(m[1]);
+        });
+        if (ids.size === 1) return [...ids][0];
+        if (ids.size > 1) return null;
+      }
+      node = node.parentElement;
+    }
+    return null;
   }
 
   function isPlausibleRow(row) {
@@ -261,7 +279,7 @@
       // Facebook 渲染出来的结构不完全一样,靠 <a href> 硬提取不是每次都管用。
       // 退一步用网络抓取到的商品列表,按标题文字找找有没有对得上的,大部分
       // 情况下还是能找到真实编号,不用眼睁睁看着这条记录以后没法自动重新上架。
-      itemId = findIdByTitleMatch(quickInfo.title) || (await waitForTitleMatch(quickInfo.title, 1500));
+      itemId = findIdByTitleMatch(quickInfo.title) || (await waitForTitleMatch(quickInfo.title, 3000));
     }
 
     if (!itemId) {

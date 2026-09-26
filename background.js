@@ -618,7 +618,7 @@ async function reconcileListings(rows) {
         best = row;
       }
     }
-    if (!best || bestScore < 0.5) continue;
+    if (!best || bestScore < 0.4) continue;
 
     listing.sourceItemId = best.id;
     listing.sourceUrl = `https://www.facebook.com/marketplace/item/${best.id}/`;
