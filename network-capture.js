@@ -301,6 +301,44 @@
     for (const obj of objs) scoreAndCollect(obj, seen, fallbackId);
   }
 
+  // 重要发现:实测拦到的响应里,唯一真正带着当前商品编号的一条,只是一个
+  // "标记为已浏览过"的小小埋点请求(251字节),根本不是商品详情本身。这说明
+  // 商品详情页的真正数据,压根就没有走一次"页面加载完之后再单独发一次请求"
+  // 这种客户端 fetch/XHR——很可能 Facebook 在服务器端直接把这些数据渲染
+  // 进了最初的 HTML 文档本身(这是 Facebook 广泛使用的一种技术,叫 BigPipe:
+  // 把大块数据当作 <script type="application/json"> 标签,分批直接嵌在
+  // HTML 里跟着页面一起吐出来,而不是等页面显示出来之后浏览器再单独去问一次
+  // 服务器要)。这种数据从来不经过 fetch/XMLHttpRequest,不管怎么拦网络请求
+  // 都不可能拦到——之前一直在拦网络请求这一件事上死磕,方向本身就漏了一半。
+  //
+  // 现在多加一条路:直接扫页面自己 DOM 里所有 <script type="application/
+  // json"> 标签,内容按跟网络响应完全一样的打分规则处理一遍。BigPipe 是分批
+  // 陆续把这些 <script> 标签插进页面的(不是一次性全部到位),所以要在页面
+  // 加载后的几个时间点各扫一次,不能只扫一次就完事。
+  function scanEmbeddedJsonScripts() {
+    const scripts = document.querySelectorAll('script[type="application/json"]');
+    if (!scripts.length) return;
+    const fallbackId = currentItemIdFromUrl();
+    const knownIds = knownItemIdsOnPage();
+    const seen = new Set();
+    scripts.forEach((script) => {
+      const text = script.textContent;
+      if (!text || text.length < 20) return;
+      graphqlSeenCount += 1;
+      recordSample(text, knownIds);
+      let obj;
+      try {
+        obj = JSON.parse(text);
+      } catch (e) {
+        return;
+      }
+      scoreAndCollect(obj, seen, fallbackId);
+    });
+    window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount, samples: rawSamples }, '*');
+  }
+
+  [400, 1200, 2500, 4500, 7000].forEach((ms) => setTimeout(scanEmbeddedJsonScripts, ms));
+
   // ── fetch ──
   const origFetch = window.fetch;
   if (origFetch) {

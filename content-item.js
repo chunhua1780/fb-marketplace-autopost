@@ -169,7 +169,54 @@
         text: `「${listing.title || '商品'}」这次用网络抓取的数据补全了详情(${net.photos && net.photos.length ? `${net.photos.length}张原图` : ''}${net.condition ? '、成色' : ''}${net.description ? '、完整描述' : ''}),类别和成色都读到了。`,
       });
     }
+
+    // 探探这个账号的 Facebook 界面里,「更多选项」菜单里有没有一个原生的
+    // 「Renew listing / 续期」选项——如果有,重新上架其实不需要"删掉重建"这么
+    // 重,直接点这个原生按钮让 Facebook 自己处理就行,又快又不会有类别/图片
+    // 这些字段读不全的风险。这里只是探测、记录一下有没有,先不改变实际的重新
+    // 上架流程——等确认这个选项存在、并且摸清楚点了以后 Facebook 具体会怎么
+    // 反应,再决定要不要真的用它替换掉现在这套"读取详情→删除→重建"的做法。
+    try {
+      const renewInfo = await checkForRenewOption();
+      listing.renewOptionSeen = renewInfo.seen;
+      if (renewInfo.seen) {
+        appendLog({
+          level: 'info',
+          text: `「${listing.title || '商品'}」的「更多选项」菜单里发现了一个可能是原生续期的选项:「${renewInfo.text}」——记录下来,后面可以考虑直接用这个,不用整个删掉重建。`,
+        });
+      }
+    } catch (err) {
+      // 探测本身失败不影响主流程,忽略即可
+    }
+
     return listing;
+  }
+
+  // 只探测、不点击——打开(如果还没开)「更多选项」菜单,看看里面的菜单项
+  // 文字有没有哪个像是"续期/renew"。就算菜单本来就是因为上面 ensureEditFormVisible
+  // 已经打开过而残留着,这里也只是再读一遍文字,不会因为多点一次而产生任何
+  // 副作用。
+  async function checkForRenewOption() {
+    let menu = document.querySelector('[role="menu"]');
+    let openedHere = false;
+    if (!menu) {
+      const moreBtn = await waitFor(() => findClickableByExactText(FB_LABELS.moreOptions), { timeout: 3000 });
+      if (!moreBtn) return { seen: false };
+      moreBtn.click();
+      openedHere = true;
+      await fbSleep(600);
+      menu = document.querySelector('[role="menu"]');
+    }
+    if (!menu) return { seen: false };
+    const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+    const renewItem = items.find((el) => /renew|续期|重新上架|更新商品|refresh listing/i.test((el.getAttribute('aria-label') || el.textContent || '').trim()));
+    if (openedHere) {
+      // 只是探测用,不是真的要进这个菜单操作——探测完把它关掉,不留一个开着
+      // 的菜单在页面上,免得干扰后面 ensureEditFormVisible 自己的逻辑。
+      document.body.click();
+      await fbSleep(200);
+    }
+    return { seen: !!renewItem, text: renewItem ? (renewItem.getAttribute('aria-label') || renewItem.textContent || '').trim() : null };
   }
 
   async function deleteListingOnPage() {
