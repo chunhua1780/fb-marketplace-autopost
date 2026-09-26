@@ -125,8 +125,10 @@ const I18N = {
     importStatusConnected: '✅ Connected to current page: {url}',
     importStatusNotConnected:
       "⚠️ The extension script hasn't connected to this page yet. The most common cause is this Facebook tab " +
-      'was already open before installing/updating the extension — please refresh it (F5) and click the ' +
-      'extension icon again.\nURL: {url}\nOriginal error: {error}',
+      'was already open before installing/updating the extension — click "Reload the Facebook page" below ' +
+      'and it will reconnect automatically.\nURL: {url}\nOriginal error: {error}',
+    reloadPageBtn: 'Reload the Facebook page',
+    reloadingPage: 'Reloading the page, please wait a moment...',
     selectModeOn:
       'Selection mode is on — go back to the Facebook page, hover over your listings, and click to select. ' +
       'You can click through many in a row.',
@@ -244,8 +246,10 @@ const I18N = {
     importStatusNotFb: '⚠️ 当前标签页不是你的「我的商品/正在出售」页面(facebook.com/marketplace/you/selling)。请先在浏览器里切换到那个页面,再回来点插件图标。',
     importStatusConnected: '✅ 已连接到当前页面:{url}',
     importStatusNotConnected:
-      '⚠️ 插件脚本还没连上这个页面。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——请刷新一下' +
-      '这个标签页(F5),再重新点插件图标。\n网址:{url}\n原始错误:{error}',
+      '⚠️ 插件脚本还没连上这个页面。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——点下面' +
+      '「刷新网页」这个按钮就会自动重新连上。\n网址:{url}\n原始错误:{error}',
+    reloadPageBtn: '刷新网页',
+    reloadingPage: '正在刷新网页,请稍等...',
     selectModeOn: '点选模式已开启——回到 Facebook 页面,把鼠标移到你的商品上,点一下就会自动选中并读取,可以连续点多个。',
     startSelectFailed: '开启失败:{error}',
   },

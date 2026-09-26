@@ -20,6 +20,7 @@ const els = {
   importStatus: document.getElementById('import-status'),
   startSelectBtn: document.getElementById('start-select-btn'),
   stopSelectBtn: document.getElementById('stop-select-btn'),
+  reloadPageBtn: document.getElementById('reload-page-btn'),
   selectProgress: document.getElementById('select-progress'),
 
   title: document.getElementById('f-title'),
@@ -304,20 +305,41 @@ async function detectCurrentTab() {
   if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace/you/')) {
     els.importStatus.textContent = t('importStatusNotFb');
     els.startSelectBtn.disabled = true;
+    els.reloadPageBtn.hidden = true;
     scanTabId = null;
     return;
   }
   scanTabId = tab.id;
-  // 光看网址不够——先实际连一下插件脚本,确认它真的已经注入到这个页面里了
+  // 光看网址不够——先实际连一下插件脚本,确认它真的已经注入到这个页面里了。
+  // 最常见的连不上原因:这个 Facebook 标签页是在插件重新加载/更新**之前**
+  // 就已经打开着的——Chrome 不会给已经打开的旧标签页补插脚本,只有标签页
+  // 重新导航(刷新/跳转)一次才会重新注入。以前这种情况只能提示用户自己去
+  // 手动刷新那个网页、或者把插件面板关了重开,两边都得来回切,体验很差。
+  // 现在直接在面板里放一个「刷新网页」按钮,点一下用插件自己的权限刷新那个
+  // 标签页,不用用户自己切过去点浏览器的刷新键。
   try {
     await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
     els.importStatus.textContent = t('importStatusConnected', { url: tab.url });
     els.startSelectBtn.disabled = false;
+    els.reloadPageBtn.hidden = true;
   } catch (err) {
     els.importStatus.textContent = t('importStatusNotConnected', { url: tab.url, error: (err && err.message) || err });
     els.startSelectBtn.disabled = true;
+    els.reloadPageBtn.hidden = false;
   }
 }
+
+els.reloadPageBtn.addEventListener('click', async () => {
+  if (!scanTabId) return;
+  els.reloadPageBtn.disabled = true;
+  els.importStatus.textContent = t('reloadingPage');
+  await chrome.tabs.reload(scanTabId);
+  // chrome.tabs.onUpdated 监听器(下面已经注册)会在页面刷新完成后自动
+  // 再调一次 detectCurrentTab(),这里不需要自己再手动重试。
+  setTimeout(() => {
+    els.reloadPageBtn.disabled = false;
+  }, 3000);
+});
 
 async function refreshSelectModeUi() {
   const { selectModeActive } = await chrome.storage.local.get('selectModeActive');
