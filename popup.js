@@ -69,7 +69,9 @@ const els = {
   startBtn: document.getElementById('start-btn'),
   stopBtn: document.getElementById('stop-btn'),
   log: document.getElementById('log'),
-  exportDebugBtn: document.getElementById('export-debug-btn'),
+  debugSection: document.getElementById('debug-section'),
+  debugDataDisplay: document.getElementById('debug-data-display'),
+  clearDebugBtn: document.getElementById('clear-debug-btn'),
 };
 
 let currentPhotos = []; // { name, dataUrl }[]
@@ -456,25 +458,24 @@ els.stopBtn.addEventListener('click', async () => {
 });
 
 // 「读取详情彻底失败」且网络那边拦到了响应、但认不出商品数据时,content-item.js
-// 会把拦到的原始数据样本存进 chrome.storage.local——这个按钮把它导出成一个文本
-// 文件,方便用户直接把文件发给开发者。比让用户去截图小小的日志框、或者打开
-// 开发者工具复制粘贴,门槛低太多。
-els.exportDebugBtn.addEventListener('click', async () => {
+// 会把拦到的原始数据样本存进 chrome.storage.local——之前做法是要用户点按钮导出
+// 成一个文件再自己去下载文件夹里找,实测下来用户找不到下载的文件、也分不清
+// "复制文字"和"发送文件"的区别。现在改成最简单直接的办法:数据一存进
+// storage,面板里这块区域就自动出现、内容直接摆在一个文本框里,用户只要点
+// 一下、全选、复制粘贴发过来就行,不需要去理解"下载文件"这件事。
+async function renderDebugData() {
   const { lastDebugCapture } = await chrome.storage.local.get('lastDebugCapture');
   if (!lastDebugCapture) {
-    alert(t('exportDebugNoData'));
+    els.debugSection.style.display = 'none';
     return;
   }
-  const blob = new Blob([JSON.stringify(lastDebugCapture, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `fbma-debug-${lastDebugCapture.itemId || 'unknown'}-${lastDebugCapture.capturedAt}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  alert(t('exportDebugDone'));
+  els.debugSection.style.display = '';
+  els.debugDataDisplay.value = JSON.stringify(lastDebugCapture, null, 2);
+}
+
+els.clearDebugBtn.addEventListener('click', async () => {
+  await chrome.storage.local.remove('lastDebugCapture');
+  await renderDebugData();
 });
 
 async function renderLog() {
@@ -494,6 +495,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (changes.runLog) renderLog();
   if (changes.faqs) renderFaqs();
   if (changes.selectModeActive) refreshSelectModeUi();
+  if (changes.lastDebugCapture) renderDebugData();
 });
 
 // 用这个包一层,是为了防止某一步(比如检测当前标签页)出问题时把整个初始化
@@ -522,6 +524,7 @@ async function renderAllDynamic() {
   await safeRun('settings', loadSettings);
   await safeRun('log', renderLog);
   await safeRun('faqs', renderFaqs);
+  await safeRun('debug data', renderDebugData);
 }
 
 els.uiLang.addEventListener('change', async () => {

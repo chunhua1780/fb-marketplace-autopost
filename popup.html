@@ -37,6 +37,13 @@
     <button id="repost-all-btn" data-i18n="repostAllBtn">Re-post all now</button>
   </section>
 
+  <section id="debug-section" style="display:none;">
+    <h2 data-i18n="debugH2">🐛 Debug info</h2>
+    <p class="hint" data-i18n="debugHint">Shows up automatically when something fails in a way that needs the developer's help. Select all the text below and paste/send it — no need to find a downloaded file.</p>
+    <textarea id="debug-data-display" readonly rows="8" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:10px;"></textarea>
+    <button id="clear-debug-btn" class="secondary" data-i18n="clearDebugBtn">Clear</button>
+  </section>
+
   <details id="advanced-section">
     <summary data-i18n="advancedSummary">More settings (folder mirror, posting rules, auto-reply, FAQ, manual add)</summary>
 
@@ -140,9 +147,6 @@
         <button id="stop-btn" class="secondary" data-i18n="stopBtn">Stop</button>
       </div>
       <div id="log"></div>
-      <div class="row">
-        <button id="export-debug-btn" class="secondary" data-i18n="exportDebugBtn">Export debug data</button>
-      </div>
     </section>
 
     <section id="form-section">
