@@ -30,6 +30,26 @@
     return m ? m[1] : null;
   }
 
+  // 商品详情页网址里就带着编号,天然只有一个"当前商品"。但"你的商品"管理
+  // 列表页不一样——网址本身不带任何商品编号,一页上同时有好几十个商品,
+  // 这种页面上"体积最大的几条就是想要的数据"这个假设完全不成立(实测已经
+  // 证实过:分享对话框、输入建议这些无关功能预加载的数据经常比真正的商品
+  // 数据大得多)。这里换一个思路:不管当前是详情页还是列表页,直接从页面
+  // 自己的 DOM 里,把所有目前已经渲染出来、带着真实编号的商品链接都读一遍
+  // (这一步就是普通的 DOM 查询,MAIN world 里跟隔离环境一样能访问同一个
+  // 页面),响应文字里只要提到了这些已知编号里的任意一个,就当作强烈信号,
+  // 优先当作样本——比单纯看响应体积大小精准得多。
+  function knownItemIdsOnPage() {
+    const ids = new Set();
+    const urlId = currentItemIdFromUrl();
+    if (urlId) ids.add(urlId);
+    document.querySelectorAll('a[href*="/marketplace/item/"]').forEach((a) => {
+      const m = (a.getAttribute('href') || '').match(/\/marketplace\/item\/(\d+)/);
+      if (m) ids.add(m[1]);
+    });
+    return ids;
+  }
+
   function stripJsonSafetyPrefix(text) {
     // Facebook 部分接口会在真正的 JSON 前面加一段防 JSON 劫持的前缀,常见的是
     // "for (;;);",不是每个接口都有,没有也不影响后面的解析。
@@ -252,8 +272,11 @@
   // 自己的编号(不管是当参数回显、还是当字段值),这比"体积大不大"精准太多。
   // 同样带编号的里面还有好几条,再按体积从小到大排——越小的越可能是只聚焦
   // 这一个商品的精简接口,不是又混进了一堆无关内容的大杂烩接口。
-  function recordSample(text, fallbackId) {
-    const mentionsItem = !!(fallbackId && text.indexOf(fallbackId) >= 0);
+  function recordSample(text, knownIds) {
+    let mentionsItem = false;
+    knownIds.forEach((id) => {
+      if (!mentionsItem && text.indexOf(id) >= 0) mentionsItem = true;
+    });
     const entry = {
       length: text.length,
       mentionsItem,
@@ -271,7 +294,7 @@
     if (!text || text.length < 20) return;
     graphqlSeenCount += 1;
     const fallbackId = currentItemIdFromUrl();
-    recordSample(text, fallbackId);
+    recordSample(text, knownItemIdsOnPage());
     window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount, samples: rawSamples }, '*');
     const objs = parseMaybeMultiJson(text);
     const seen = new Set();

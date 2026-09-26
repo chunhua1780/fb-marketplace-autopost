@@ -25,12 +25,37 @@
   // 到同一个提取失败。现在多一条后路:提取不到链接时,按标题文字去网络抓到的
   // 商品列表里找一下有没有对得上的,大部分情况下也能找到真实编号。
   const netListings = new Map(); // id -> {title, ...}
+  let graphqlSeenCount = 0;
+  let graphqlSamples = [];
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const msg = event.data;
-    if (!msg || msg.source !== 'fbma-net-capture' || msg.type !== 'LISTING_DATA' || !msg.id) return;
-    netListings.set(msg.id, msg.data);
+    if (!msg || msg.source !== 'fbma-net-capture') return;
+    if (msg.type === 'LISTING_DATA' && msg.id) {
+      netListings.set(msg.id, msg.data);
+    } else if (msg.type === 'GRAPHQL_SEEN') {
+      graphqlSeenCount = msg.count;
+      graphqlSamples = msg.samples || [];
+    }
   });
+
+  // 选商品这一步,DOM 提取和网络标题匹配两条路都走不通时,把网络那边拦到的
+  // 原始样本也存起来——跟商品详情页那边(content-item.js)是同一个思路、同一
+  // 个 storage key,面板里的"🐛 调试信息"区域不用改代码就能自动显示这边
+  // 抓到的样本。
+  async function saveDebugSamples(context) {
+    if (!graphqlSamples.length) return;
+    await chrome.storage.local.set({
+      lastDebugCapture: {
+        context,
+        url: location.href,
+        pageTitle: document.title,
+        capturedAt: Date.now(),
+        graphqlSeenCount,
+        samples: graphqlSamples,
+      },
+    });
+  }
 
   function normalizeTitleForMatch(text) {
     return (text || '')
@@ -237,6 +262,12 @@
       // 退一步用网络抓取到的商品列表,按标题文字找找有没有对得上的,大部分
       // 情况下还是能找到真实编号,不用眼睁睁看着这条记录以后没法自动重新上架。
       itemId = findIdByTitleMatch(quickInfo.title) || (await waitForTitleMatch(quickInfo.title, 1500));
+    }
+
+    if (!itemId) {
+      // 两条路都没找到编号——把网络那边拦到的原始样本存起来,面板里"🐛 调试
+      // 信息"那块区域会自动显示出来,不用用户再去找文件、复制文字发过来就行。
+      await saveDebugSamples(`select-list-row:${quickInfo.title || ''}`);
     }
 
     chrome.runtime.sendMessage({ type: 'QUEUE_DETAIL_READ', itemId, quickInfo }).catch(() => {});
