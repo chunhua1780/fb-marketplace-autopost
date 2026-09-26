@@ -18,7 +18,12 @@ if (typeof globalThis.FB_LABELS === 'undefined') {
     location: ['Location', '地点', '地點'],
     next: ['Next', '下一步'],
     publish: ['Publish', '发布', '發佈', '刊登'],
-    editListing: ['Edit listing', 'Edit Listing', '编辑商品', '編輯商品', 'Edit'],
+    // 之前这里还有个单独的 'Edit' 候选词,想的是宽泛点、多个机会命中——结果
+    // 实测抓到过一次真实数据,证明这个词太宽泛,会在页面上任何带"Edit"字样
+    // 的无关按钮上误命中(比如分享对话框里的"Edit privacy..."),点下去反而
+    // 触发了不相关的东西,还耽误了真正应该点的按钮。去掉之后只保留比较完整、
+    // 不容易撞车的短语。
+    editListing: ['Edit listing', 'Edit Listing', '编辑商品', '編輯商品'],
     moreOptions: ['More', 'More options', '更多选项', '更多'],
   };
 }
@@ -98,6 +103,26 @@ function findClickableByText(candidates, root = document) {
   for (const el of nodes) {
     const label = el.getAttribute('aria-label') || el.textContent;
     if (fbTextMatches(label, candidates)) return el;
+  }
+  return null;
+}
+
+// findClickableByText 用的是"文字里包含候选词就算命中"这种宽松匹配,对
+// "Publish"这种候选词没问题,但对"More"、"Edit"这种本身就是常见英文单词
+// 的候选词很危险——实测抓到过一次真实数据,证实了"更多选项"那个按钮压根
+// 没点中,反而误点中了页面上恰好带着"Edit privacy..."文字的分享对话框按钮
+// (因为"Edit privacy..."这句话里包含"Edit"这几个字母)。像"更多选项菜单"
+// 这种按钮,它自己的 aria-label/文字通常就是"More"/"更多选项"这几个字,
+// 精确相等,不需要也不应该用包含匹配——这里单独提供一个要求完全匹配的版本,
+// 专门给这种"候选词本身很容易在无关文字里出现"的场景用。
+function findClickableByExactText(candidates, root = document) {
+  const nodes = Array.from(
+    root.querySelectorAll('div[role="button"], span[role="button"], button, a[role="button"], [role="menuitem"]')
+  );
+  const normCandidates = candidates.map(fbNormalize);
+  for (const el of nodes) {
+    const label = fbNormalize(el.getAttribute('aria-label') || el.textContent);
+    if (label && normCandidates.includes(label)) return el;
   }
   return null;
 }
@@ -182,11 +207,12 @@ async function ensureEditFormVisible() {
   if (!editBtn) {
     // 自己商品的详情页里,「Edit listing」经常不是直接摆在页面上的,而是跟
     // 「Delete listing」放在一起,藏在「More options / 更多选项」这个菜单按钮
-    // 点开以后才出现——删除功能那边(content-item.js 的 deleteListingOnPage)
-    // 已经证实过这个套路管用,这里补上同样先点一下菜单再找的步骤。之前没有
-    // 这一步,导致直接搜「Edit」在很多商品页上根本搜不到,誤判成"没能展开
-    // 编辑表单",其实只是没点开那个菜单。
-    const moreBtn = await waitFor(() => findClickableByText(FB_LABELS.moreOptions), { timeout: 4000 });
+    // 点开以后才出现。这里的「More」用 findClickableByExactText 精确匹配,
+    // 不能用宽松的包含匹配——实测抓到过真实数据,证明宽松匹配会在页面上
+    // 任何带"more"字样的无关按钮上误命中(比如展开长描述用的"See more"),
+    // 点了跟"更多选项"完全没关系的东西,菜单根本没打开,后面自然找不到
+    // 「Edit listing」。
+    const moreBtn = await waitFor(() => findClickableByExactText(FB_LABELS.moreOptions), { timeout: 4000 });
     if (moreBtn) {
       moreBtn.click();
       await fbSleep(600);

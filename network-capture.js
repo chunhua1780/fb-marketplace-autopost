@@ -243,19 +243,36 @@
   const SAMPLE_TRUNC = 2000;
   let rawSamples = [];
 
-  function recordSample(text) {
-    const entry = { length: text.length, sample: text.length > SAMPLE_TRUNC ? text.slice(0, SAMPLE_TRUNC) + '…(截断)' : text };
+  // 挑样本时,"体积最大的几条"这个排序方式实测证明是错的:商品详情页上经常
+  // 还预加载着分享对话框(@提及好友的自动补全、隐私选择器这些),这些东西
+  // 随随便便就是几十万字符,比真正的商品数据(一个标题/价格/类别/几张图的
+  // 链接)大得多——体积最大的几条几乎全是这些无关的分享/输入建议数据,真正
+  // 想要的商品数据反而被挤出了样本之外。改成优先挑"响应文字里出现了当前
+  // 商品编号"的那些——真正描述这个商品的接口,响应里几乎一定会带着这个商品
+  // 自己的编号(不管是当参数回显、还是当字段值),这比"体积大不大"精准太多。
+  // 同样带编号的里面还有好几条,再按体积从小到大排——越小的越可能是只聚焦
+  // 这一个商品的精简接口,不是又混进了一堆无关内容的大杂烩接口。
+  function recordSample(text, fallbackId) {
+    const mentionsItem = !!(fallbackId && text.indexOf(fallbackId) >= 0);
+    const entry = {
+      length: text.length,
+      mentionsItem,
+      sample: text.length > SAMPLE_TRUNC ? text.slice(0, SAMPLE_TRUNC) + '…(截断)' : text,
+    };
     rawSamples.push(entry);
-    rawSamples.sort((a, b) => b.length - a.length);
+    rawSamples.sort((a, b) => {
+      if (a.mentionsItem !== b.mentionsItem) return a.mentionsItem ? -1 : 1;
+      return a.mentionsItem ? a.length - b.length : b.length - a.length;
+    });
     rawSamples = rawSamples.slice(0, MAX_SAMPLES);
   }
 
   function handleResponseText(text) {
     if (!text || text.length < 20) return;
     graphqlSeenCount += 1;
-    recordSample(text);
-    window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount, samples: rawSamples }, '*');
     const fallbackId = currentItemIdFromUrl();
+    recordSample(text, fallbackId);
+    window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount, samples: rawSamples }, '*');
     const objs = parseMaybeMultiJson(text);
     const seen = new Set();
     for (const obj of objs) scoreAndCollect(obj, seen, fallbackId);

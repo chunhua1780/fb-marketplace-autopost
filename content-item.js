@@ -173,7 +173,10 @@
   }
 
   async function deleteListingOnPage() {
-    const menuBtn = await waitFor(() => findClickableByText(FB_LABELS.moreOptions), { timeout: 8000 });
+    // 用精确匹配,不用宽松的包含匹配——"More"这种候选词太容易在无关按钮
+    // (比如展开长文字用的"See more")上误命中,详见 field-utils.js 里
+    // findClickableByExactText 的说明。
+    const menuBtn = await waitFor(() => findClickableByExactText(FB_LABELS.moreOptions), { timeout: 8000 });
     if (menuBtn) {
       menuBtn.click();
       await fbSleep(600);
