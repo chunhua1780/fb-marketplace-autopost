@@ -602,14 +602,27 @@ function titleOverlapScore(a, b) {
 }
 
 async function reconcileListings(rows) {
-  if (!rows || !rows.length) return { ok: true, fixed: 0 };
   const listings = await getListings();
+  const stuckListings = listings.filter((l) => !l.sourceItemId && l.title);
+  if (!stuckListings.length) return { ok: true, fixed: 0 }; // 没有卡死的记录,不用扫描结果也没关系
+
+  // 之前这里"扫到 0 条"或者"扫到了但没匹配上"都是直接默默退出,完全没有
+  // 任何记录——用户按提示逛了页面、结果还是没恢复的时候,插件自己心里其实
+  // 是知道原因的(到底是页面上一条商品信息都没扫到,还是扫到了但标题对不
+  // 上),只是从来没告诉过用户。现在把这两种情况都记进日志里,不用再靠猜。
+  if (!rows || !rows.length) {
+    await appendLog({
+      level: 'error',
+      text: `自动修复扫描:当前页面上一条商品的标题+编号都没扫到(DOM 链接和网络抓取都没找到),没法帮这 ${stuckListings.length} 条卡死的记录补编号——可能是这个页面的卡片结构插件还不认识。麻烦把插件面板里"🐛 调试信息"那块区域的内容发给开发者看看。`,
+    });
+    return { ok: true, fixed: 0 };
+  }
+
   let fixedCount = 0;
+  let bestScoreSeen = 0;
+  let bestMatchListingTitle = '';
 
-  for (const listing of listings) {
-    if (listing.sourceItemId) continue; // 已经有真实编号的不用管
-    if (!listing.title) continue;
-
+  for (const listing of stuckListings) {
     let best = null;
     let bestScore = 0;
     for (const row of rows) {
@@ -619,6 +632,10 @@ async function reconcileListings(rows) {
         bestScore = score;
         best = row;
       }
+    }
+    if (bestScore > bestScoreSeen) {
+      bestScoreSeen = bestScore;
+      bestMatchListingTitle = listing.title;
     }
     if (!best || bestScore < 0.4) continue;
 
@@ -637,7 +654,14 @@ async function reconcileListings(rows) {
     });
   }
 
-  if (fixedCount > 0) await saveListings(listings);
+  if (fixedCount > 0) {
+    await saveListings(listings);
+  } else {
+    await appendLog({
+      level: 'info',
+      text: `自动修复扫描:这次在页面上扫到了 ${rows.length} 条商品信息,但跟卡死的 ${stuckListings.length} 条记录里最接近的一条(「${bestMatchListingTitle}」)标题重叠度只有 ${Math.round(bestScoreSeen * 100)}%(需要至少 40% 才会自动关联),暂时没能自动修复。可能是这条商品这次没加载在页面可见范围内,往下滚动一下页面、或者多等一会儿再试。`,
+    });
+  }
   return { ok: true, fixed: fixedCount };
 }
 
