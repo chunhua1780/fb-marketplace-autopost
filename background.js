@@ -102,6 +102,9 @@ async function handleMessage(message, sender) {
     case 'QUEUE_DETAIL_READ':
       return queueDetailRead(message.itemId || null, message.quickInfo || {});
 
+    case 'RECONCILE_LISTINGS':
+      return reconcileListings(message.rows || []);
+
     default:
       return { ok: false, error: '未知消息类型: ' + message.type };
   }
@@ -561,6 +564,79 @@ async function saveBasicListing(itemId, quickInfo) {
     text: `已导入基本信息(标题/价格):「${quickInfo.title || itemId || '商品'}」`,
   });
   writeListingToFolder(saved).catch(() => {});
+}
+
+// ---------- 卡死记录自动修复:没有真实编号的记录,趁用户逛"你的商品"页面顺手补上 ----------
+
+// 之前遇到过好几次:某条记录一开始选中的时候就没能读到 Facebook 真实商品
+// 编号(不同卡片样式/商品状态下,页面结构不完全一样,提取编号不是每次都
+// 管用),一旦发生,这条记录就永久卡死——"删掉重新选同一个商品"救不回来,
+// 因为重新选会再踩一次同样的提取失败,死循环。用户来回试了很多次都卡在
+// 这里,必须换个不依赖"用户手动操作对了"的办法。
+//
+// 现在的办法:content-my-listings.js 只要检测到用户正在浏览"你的商品"页面,
+// 不需要用户点选任何东西,就会自动把页面上(以及网络请求里)能看到的所有
+// 商品「标题 + 真实编号」扫一遍、发过来。这里收到以后,拿这份列表去比对
+// 已经卡死(没有编号)的旧记录,标题对得上就自动把编号补上、状态从「失败」
+// 改回「待处理」,让它重新进入正常的重新上架流程——用户不需要意识到、也不
+// 需要做任何"删除再重新选"这种容易出错的操作,只要照常打开那个页面逛一逛,
+// 卡死的记录就会自己好。
+function normalizeTitleForMatch(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
+}
+
+function titleOverlapScore(a, b) {
+  const wa = new Set(normalizeTitleForMatch(a).split(' ').filter(Boolean));
+  const wb = new Set(normalizeTitleForMatch(b).split(' ').filter(Boolean));
+  if (!wa.size || !wb.size) return 0;
+  let common = 0;
+  wa.forEach((w) => {
+    if (wb.has(w)) common += 1;
+  });
+  return common / Math.max(wa.size, wb.size);
+}
+
+async function reconcileListings(rows) {
+  if (!rows || !rows.length) return { ok: true, fixed: 0 };
+  const listings = await getListings();
+  let fixedCount = 0;
+
+  for (const listing of listings) {
+    if (listing.sourceItemId) continue; // 已经有真实编号的不用管
+    if (!listing.title) continue;
+
+    let best = null;
+    let bestScore = 0;
+    for (const row of rows) {
+      if (!row || !row.id || !row.title) continue;
+      const score = titleOverlapScore(listing.title, row.title);
+      if (score > bestScore) {
+        bestScore = score;
+        best = row;
+      }
+    }
+    if (!best || bestScore < 0.5) continue;
+
+    listing.sourceItemId = best.id;
+    listing.sourceUrl = `https://www.facebook.com/marketplace/item/${best.id}/`;
+    // 之前因为没编号被判定失败、卡在原地的,现在补上编号了,重新给它一次
+    // 机会,让它自己回到正常的重新上架流程里去。
+    if (listing.status === 'failed') {
+      listing.status = 'pending';
+      listing.lastError = null;
+    }
+    fixedCount += 1;
+    await appendLog({
+      level: 'success',
+      text: `逛"你的商品"页面时,自动帮「${listing.title}」找到并关联上了真实 Facebook 编号(之前是卡死状态,现在已经可以正常重新上架了)。`,
+    });
+  }
+
+  if (fixedCount > 0) await saveListings(listings);
+  return { ok: true, fixed: fixedCount };
 }
 
 async function setListingFields(id, fields) {

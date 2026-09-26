@@ -248,6 +248,46 @@
     );
   }
 
+  // 卡死记录自动修复:有的记录一开始选中时就没读到真实编号(不同卡片样式/
+  // 商品状态下提取不总是管用),一旦发生,"删掉重新选同一个商品"是救不回来
+  // 的,因为重新选会再踩一次同样的提取失败——用户来回试了很多次都卡在这里。
+  // 现在不用等用户点选任何东西:只要这个页面被打开过,就自动把页面上(以及
+  // 网络请求里)能看到的所有商品「标题+真实编号」扫一遍发给 background.js,
+  // 它会拿这份列表去比对已经卡死的旧记录,标题对得上就自动补上编号、解除卡死
+  // 状态。用户只需要照常打开这个页面逛一逛,不需要意识到、也不需要做任何
+  // "删除再重新选"这种容易做错的操作。
+  function scanAllVisibleRows() {
+    const links = Array.from(document.querySelectorAll('a[href*="/marketplace/item/"]'));
+    const seenRows = new Set();
+    const rows = [];
+    for (const link of links) {
+      const row = findRowBoundary(link);
+      if (!row || seenRows.has(row)) continue;
+      seenRows.add(row);
+      const itemId = extractItemId(row);
+      if (!itemId) continue;
+      const quickInfo = extractQuickInfo(row);
+      if (quickInfo.title) rows.push({ id: itemId, title: quickInfo.title });
+    }
+    // 网络那边抓到的也一起带上——能覆盖到还没滚动到、DOM 里还没渲染出来的商品。
+    netListings.forEach((info, id) => {
+      if (info.title) rows.push({ id, title: info.title });
+    });
+    return rows;
+  }
+
+  function runReconcile() {
+    const rows = scanAllVisibleRows();
+    if (rows.length) chrome.runtime.sendMessage({ type: 'RECONCILE_LISTINGS', rows }).catch(() => {});
+  }
+
+  // 页面刚加载时列表可能还没渲染完、网络数据也可能还没到位,多扫几次覆盖
+  // 更全——不用 MutationObserver 这种一直盯着 DOM 变化的办法,Facebook 页面
+  // 变化太频繁,容易被触发到卡顿,固定扫几次足够了、开销也小。
+  setTimeout(runReconcile, 2000);
+  setTimeout(runReconcile, 5000);
+  setTimeout(runReconcile, 10000);
+
   function activateSelectMode() {
     selectModeActive = true;
     document.addEventListener('mousemove', handleMouseMove, true);
