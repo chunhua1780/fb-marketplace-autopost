@@ -227,12 +227,15 @@ async function refreshListingIfIncomplete(listing) {
   if (!incomplete) return { listing, blockedReason: null };
 
   if (!listing.sourceItemId) {
-    // 没有 Facebook 真实商品编号,压根不知道去哪个网址重新读——这种商品当初
-    // 导入的时候大概率没弹出详情框、也没能从那一行本身拿到链接,只存下了标题/
-    // 价格。没法自动补全,得用户自己把这条删掉、直接去 Facebook 页面上重新点
-    // 一次这个商品(不是点"Re-post now"重试),才能重新抓到真实编号。
+    // 没有 Facebook 真实商品编号,压根不知道去哪个网址重新读。之前这里让用户
+    // 把这条记录删掉、回 Facebook 重新点一次——但这个建议其实已经过时了:
+    // 现在 content-my-listings.js 只要检测到"你的商品"页面被打开过,就会
+    // 自动把页面上能看到的商品标题+编号扫一遍,发给 reconcileListings() 去
+    // 比对、自动补上编号(不需要用户点选任何东西),删掉这条记录反而会把已经
+    // 存下来的标题/图片这些本地数据一起丢掉,没有必要。所以这里不再建议删除,
+    // 改成提示用户去逛一下那个页面,让自动修复机制有机会跑起来。
     const reason =
-      '缺图片,这条记录没有关联到 Facebook 真实商品编号,没法自动重新读取——请把这条删掉,回到 Facebook 页面重新点一次这个商品(不是点"Re-post now"重试),让它重新抓一次真实编号和完整信息。';
+      '缺图片,这条记录还没关联到 Facebook 真实商品编号——不用删除这条记录:回到 Facebook 的"你的商品"页面(facebook.com/marketplace/you/selling)停留几秒钟,插件会自动在后台尝试把这条记录跟页面上的商品对上号、补上编号,补上后这条会自动变回「待处理」,不需要手动做任何操作。如果逛了几次都没有自动恢复,再考虑删除这条、重新在该页面上点一次对应的商品。';
     return { listing, blockedReason: reason };
   }
 
