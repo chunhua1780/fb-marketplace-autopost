@@ -2,10 +2,20 @@
 // 依赖 field-utils.js 提供的 DOM 辅助方法(manifest.json 里已经一起注入)
 
 (function () {
+  // 之前这里是"设好 input.files、触发一次 change 事件、傻等 1.5 秒就假设
+  // 成功了"——从来没有真正确认过 Facebook 是不是真的收到、真的处理完了这些
+  // 图片。这几天所有的排查都停在"读取旧商品详情"这一步,还从来没有机会验证
+  // 过"上传新图片"这一步本身到底行不行——万一真正卡住重新上架的其实是这里,
+  // 之前的做法完全没办法发现,报错永远只会是后面"找不到发布按钮"这种隔了
+  // 好几步的下游症状,看不出真正死在哪一步。
+  //
+  // 现在把这一步拆成几个能分别确认的阶段,每一步都要验证"确实发生了"才往下
+  // 走,哪一步卡住,报错信息就直接说是哪一步,不用再靠猜。
   async function attachPhotos(photos) {
     if (!photos || !photos.length) return;
+
     const input = await waitFor(() => document.querySelector('input[type="file"]'));
-    if (!input) throw new Error('找不到上传照片的输入框,可能是页面结构已变化');
+    if (!input) throw new Error('[FILE_INPUT_NOT_FOUND] 找不到上传照片的输入框,可能是页面结构已变化');
 
     const files = [];
     for (const p of photos) {
@@ -13,11 +23,39 @@
       const blob = await res.blob();
       files.push(new File([blob], p.name || 'photo.jpg', { type: blob.type || 'image/jpeg' }));
     }
+    if (files.length !== photos.length) {
+      throw new Error(`[FILE_OBJECT_INCOMPLETE] 只成功把 ${files.length}/${photos.length} 张图片转换成了可上传的文件,中间某几张失败了`);
+    }
+
     const dt = new DataTransfer();
     files.forEach((f) => dt.items.add(f));
     input.files = dt.files;
+    if (input.files.length !== files.length) {
+      throw new Error(`[FILE_LIST_ASSIGN_FAILED] 浏览器没能把这 ${files.length} 个文件真正赋给上传控件,控件上实际只看到 ${input.files.length} 个——这一步是纯浏览器层面的操作,失败大概率是 Facebook 改了这个控件的写法`);
+    }
+
+    input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
-    await fbSleep(1500);
+
+    // 这才是真正能确认"Facebook 收到并且在处理"的信号——不是傻等几秒钟就
+    // 假设成功,而是真的等页面上新出现预览缩略图。页面上其他地方也可能同时
+    // 有别的图片在加载(头像、图标之类),所以看的是"新增了多少张",不是
+    // "总共有多少张"。
+    const beforeCount = document.querySelectorAll('img').length;
+    const newCount = await waitFor(() => {
+      const delta = document.querySelectorAll('img').length - beforeCount;
+      return delta > 0 ? delta : null;
+    }, { timeout: 8000, interval: 300 });
+
+    if (!newCount) {
+      throw new Error(
+        `[UPLOAD_PREVIEW_NOT_DETECTED] 已经把 ${files.length} 张图片交给了上传控件、也触发了变化事件,但等了 8 秒页面上完全没有新出现的图片预览——文件本身交过去了,但 Facebook 那边好像没收到或者没处理这次上传,不是插件这边卡住不动`
+      );
+    }
+    // 新增数量没有精确匹配到预期张数不算失败——缩略图渲染方式不一定是一张
+    // 图对应一个 <img>,数不准很正常,重要的是确认了"确实有新内容出现",不是
+    // 完全没反应。
+    await fbSleep(1000);
   }
 
   // 类别选得准不准不重要,重要的是必须选上——Facebook 要求这个字段非空才会
@@ -174,6 +212,18 @@
           // 文字都列出来,下次再出这个错,日志里就直接有答案,不用再来回一轮。
           throw new Error(
             `已自动填好表单,但没找到「发布」按钮,请手动检查并点击发布。诊断信息:${JSON.stringify(collectDiagnostics())}`
+          );
+        }
+        // 「发布」按钮找到了,不代表它是能点的——Facebook 经常把必填项没填全
+        // 时的发布按钮渲染成灰色但还在页面上(aria-disabled="true")。之前
+        // 这种情况会直接点下去,Facebook 什么反应都没有,只能等 8 秒后靠
+        // "网址没跳转"这个更晚的信号才发现有问题,报错也说不清到底是哪个
+        // 环节。现在提前检查一下,能立刻说清楚"按钮找到了但是灰的,肯定是
+        // 少了某个必填项",不用再等那 8 秒、也不用再猜。
+        const isDisabled = publishBtn.getAttribute('aria-disabled') === 'true' || publishBtn.disabled === true;
+        if (isDisabled) {
+          throw new Error(
+            `[PUBLISH_DISABLED] 找到了「发布」按钮,但它是灰色不能点的状态——说明表单里还有某个必填项没填(图片/类别/成色/地点这些都有可能),不是没找到按钮的问题。诊断信息:${JSON.stringify(collectDiagnostics())}`
           );
         }
         publishBtn.click();
