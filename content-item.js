@@ -19,6 +19,7 @@
   // scrapeListingOnPage 读表单的同时,把这份网络抓到的数据也合并进去。
   const netCaptured = {};
   let graphqlSeenCount = 0;
+  let graphqlSamples = [];
   window.addEventListener('message', (event) => {
     if (event.source !== window) return;
     const msg = event.data;
@@ -27,8 +28,25 @@
       netCaptured[msg.id] = msg.data;
     } else if (msg.type === 'GRAPHQL_SEEN') {
       graphqlSeenCount = msg.count;
+      graphqlSamples = msg.samples || [];
     }
   });
+
+  // 网络抓取彻底没认出商品数据时,把拦到的原始样本存起来,让用户能在面板里
+  // 点「导出调试数据」把这些样本导出成一个文件发过来——有了 Facebook 真实
+  // 返回的数据长什么样,才能一次改对打分规则,不用再靠猜。
+  async function saveDebugSamples(itemId) {
+    if (!graphqlSamples.length) return;
+    await chrome.storage.local.set({
+      lastDebugCapture: {
+        itemId,
+        url: location.href,
+        pageTitle: document.title,
+        capturedAt: Date.now(),
+        samples: graphqlSamples,
+      },
+    });
+  }
 
   function currentItemId() {
     const m = location.href.match(/\/marketplace\/item\/(\d+)/);
@@ -88,10 +106,13 @@
       const ready = await ensureEditFormVisible();
       if (!ready) {
         if (!net) {
-          const netHint =
-            graphqlSeenCount > 0
-              ? `拦截到了 ${graphqlSeenCount} 次 GraphQL 响应,但没有一个长得像商品信息(可能是打分规则没认出来,不是拦截机制坏了)`
-              : '一次 GraphQL 响应都没拦截到(可能是这个 Chrome 版本不支持网络抓取这层机制,或者页面还没加载完就已经开始读取)';
+          let netHint;
+          if (graphqlSeenCount > 0) {
+            netHint = `拦截到了 ${graphqlSeenCount} 次 GraphQL 响应,但没有一个长得像商品信息(可能是打分规则没认出来,不是拦截机制坏了)。已经把拦到的原始数据样本存起来了,去插件面板点一下「导出调试数据」,把导出的文件发给开发者,能一次性改对识别规则,不用再靠猜`;
+            await saveDebugSamples(itemId);
+          } else {
+            netHint = '一次 GraphQL 响应都没拦截到(可能是这个 Chrome 版本不支持网络抓取这层机制,或者页面还没加载完就已经开始读取)';
+          }
           throw new Error(`没能展开完整的编辑表单,网络那边也没抓到数据(${netHint}),读取详情彻底失败。诊断信息:${JSON.stringify(collectDiagnostics())}`);
         }
         // 编辑表单打不开,但网络那边好歹抓到了一部分,先用这部分凑合,总比

@@ -69,6 +69,7 @@ const els = {
   startBtn: document.getElementById('start-btn'),
   stopBtn: document.getElementById('stop-btn'),
   log: document.getElementById('log'),
+  exportDebugBtn: document.getElementById('export-debug-btn'),
 };
 
 let currentPhotos = []; // { name, dataUrl }[]
@@ -452,6 +453,28 @@ els.startBtn.addEventListener('click', async () => {
 
 els.stopBtn.addEventListener('click', async () => {
   await chrome.runtime.sendMessage({ type: 'STOP_QUEUE' });
+});
+
+// 「读取详情彻底失败」且网络那边拦到了响应、但认不出商品数据时,content-item.js
+// 会把拦到的原始数据样本存进 chrome.storage.local——这个按钮把它导出成一个文本
+// 文件,方便用户直接把文件发给开发者。比让用户去截图小小的日志框、或者打开
+// 开发者工具复制粘贴,门槛低太多。
+els.exportDebugBtn.addEventListener('click', async () => {
+  const { lastDebugCapture } = await chrome.storage.local.get('lastDebugCapture');
+  if (!lastDebugCapture) {
+    alert(t('exportDebugNoData'));
+    return;
+  }
+  const blob = new Blob([JSON.stringify(lastDebugCapture, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `fbma-debug-${lastDebugCapture.itemId || 'unknown'}-${lastDebugCapture.capturedAt}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  alert(t('exportDebugDone'));
 });
 
 async function renderLog() {

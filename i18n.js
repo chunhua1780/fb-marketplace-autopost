@@ -72,6 +72,9 @@ const I18N = {
     runH2: 'Publish queue',
     startBtn: 'Start publish queue',
     stopBtn: 'Stop',
+    exportDebugBtn: 'Export debug data',
+    exportDebugNoData: 'No debug data captured yet — this shows up after a "failed to read details" error where the network capture ran but found nothing usable.',
+    exportDebugDone: 'Debug data exported — please send the downloaded file to the developer.',
 
     formTitleAdd: 'Manually add an item (rarely used, kept last)',
     formTitleEdit: 'Edit item',
@@ -193,6 +196,9 @@ const I18N = {
     runH2: '发布队列',
     startBtn: '开始发布队列',
     stopBtn: '停止',
+    exportDebugBtn: '导出调试数据',
+    exportDebugNoData: '还没有可导出的调试数据——出现"读取详情失败"、并且提示已经抓到网络数据样本时,这里才会有内容。',
+    exportDebugDone: '调试数据已导出,请把下载下来的文件发给开发者。',
 
     formTitleAdd: '手动新增商品(不常用,放在最后)',
     formTitleEdit: '编辑商品',

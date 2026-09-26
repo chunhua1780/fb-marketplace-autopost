@@ -232,10 +232,29 @@
   // 需要调整认的规则,而不是怀疑整个思路)——这两种问题的排查方向完全不同。
   let graphqlSeenCount = 0;
 
+  // 排查用的原始数据样本:每次拦到响应,不管有没有打出分,都留一份「有没有希望
+  // 是商品数据」的样本——只留体积最大的几条(真正的商品详情数据量通常比页面上
+  // 一堆小的埋点/已读回执请求大得多,这样留下来的大概率就是真正想找的那条),
+  // 每条只截前 2000 字(信息量已经够看出字段长什么样,又不会把整个响应的其他
+  // 用户隐私内容都塞进去)。之前打分规则死活认不出真实数据时,只能靠我自己
+  // 凭经验瞎猜字段名,一次次改一次次错——有这份真实样本以后,只要用户导出发
+  // 过来,就能直接照着真实数据把打分规则改对,不用再猜。
+  const MAX_SAMPLES = 3;
+  const SAMPLE_TRUNC = 2000;
+  let rawSamples = [];
+
+  function recordSample(text) {
+    const entry = { length: text.length, sample: text.length > SAMPLE_TRUNC ? text.slice(0, SAMPLE_TRUNC) + '…(截断)' : text };
+    rawSamples.push(entry);
+    rawSamples.sort((a, b) => b.length - a.length);
+    rawSamples = rawSamples.slice(0, MAX_SAMPLES);
+  }
+
   function handleResponseText(text) {
     if (!text || text.length < 20) return;
     graphqlSeenCount += 1;
-    window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount }, '*');
+    recordSample(text);
+    window.postMessage({ source: 'fbma-net-capture', type: 'GRAPHQL_SEEN', count: graphqlSeenCount, samples: rawSamples }, '*');
     const fallbackId = currentItemIdFromUrl();
     const objs = parseMaybeMultiJson(text);
     const seen = new Set();
