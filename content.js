@@ -20,33 +20,6 @@
     await fbSleep(1500);
   }
 
-  async function selectFromDropdown(triggerCandidates, optionText) {
-    if (!optionText) return;
-    const trigger = await waitFor(
-      () => findFieldByLabel(triggerCandidates) || findFieldByNearbyLabel(triggerCandidates) || findClickableByText(triggerCandidates)
-    );
-    if (!trigger) throw new Error(`找不到「${optionText}」对应的选择控件`);
-    trigger.click();
-    await fbSleep(400);
-
-    const activeInput = document.activeElement;
-    if (activeInput && activeInput.tagName === 'INPUT') {
-      setNativeValue(activeInput, optionText);
-      await fbSleep(500);
-    }
-
-    const option = await waitFor(() => {
-      const options = Array.from(document.querySelectorAll('[role="option"], li'));
-      return options.find((o) => fbNormalize(o.textContent).includes(fbNormalize(optionText))) || null;
-    }, { timeout: 5000 });
-
-    if (!option) {
-      throw new Error(`在下拉列表里没找到「${optionText}」这个选项,请确认文字与 Facebook 页面上显示的完全一致`);
-    }
-    option.click();
-    await fbSleep(300);
-  }
-
   // 类别选得准不准不重要,重要的是必须选上——Facebook 要求这个字段非空才会
   // 解锁发布按钮。类别选择器大概率点开后弹出的是一整棵分类树(选大类→再选
   // 子类,可能还有第三层),不是一层列表,所以这里不要求精确匹配:能对上原来
@@ -81,6 +54,34 @@
       pick.click();
       await fbSleep(600);
     }
+  }
+
+  // 成色也一样改成"选得准不准不重要,重要的是必须选上"——实测下来,不少商品
+  // 压根就没能读到成色文字(不是插件哪里没写对,是 Facebook 商品详情页本身
+  // 就没把这个信息带出来,读不到不代表以后就一定能读到)。之前的做法是:读到
+  // 了就试着精确匹配、读不到就完全跳过这个字段,导致这些商品的成色永远是空
+  // 的,Facebook 很可能因为这个必填项没填而不让发布。现在换成跟类别一样的
+  // 思路:不管有没有读到原来的成色文字,都尝试把这个下拉框点开、选一个选项
+  // (读到过文字的话优先选对得上的,没有就选第一个),保证这个字段最终有值。
+  async function selectConditionBestEffort(triggerCandidates, preferredText) {
+    const trigger = await waitFor(
+      () => findFieldByLabel(triggerCandidates) || findFieldByNearbyLabel(triggerCandidates) || findClickableByText(triggerCandidates)
+    );
+    if (!trigger) throw new Error('找不到「成色」对应的选择控件');
+    trigger.click();
+    await fbSleep(400);
+
+    const options = await waitFor(() => {
+      const list = Array.from(document.querySelectorAll('[role="option"], li')).filter((el) => el.offsetParent !== null);
+      return list.length ? list : null;
+    }, { timeout: 3000 });
+    if (!options) throw new Error('成色下拉列表没有弹出任何选项');
+
+    let pick = null;
+    if (preferredText) pick = options.find((o) => fbNormalize(o.textContent).includes(fbNormalize(preferredText)));
+    if (!pick) pick = options[0];
+    pick.click();
+    await fbSleep(300);
   }
 
   // 发布成功后 Facebook 通常会跳到新商品自己的页面,尝试从网址里读出新商品的 id,
@@ -128,16 +129,14 @@
         steps.push(`选择类别失败(已跳过,请手动选择类别): ${(err && err.message) || err}`);
       }
 
-      // 成色跟类别不一样,选项通常就是一层(全新/二手-好/二手-一般这种),要求
-      // 新表单里的选项文字跟旧商品读到的完全一致才能选中——版本、语言、Facebook
-      // 改过措辞都可能对不上,选不中同样只是跳过、不影响其他字段。
-      if (listing.condition) {
-        steps.push('选择成色');
-        try {
-          await selectFromDropdown(FB_LABELS.condition, listing.condition);
-        } catch (err) {
-          steps.push(`选择成色失败(已跳过,请手动选择「${listing.condition}」): ${(err && err.message) || err}`);
-        }
+      // 成色跟类别一样,不管有没有从旧商品读到具体成色文字,都尝试把下拉框
+      // 点开选一个(优先匹配读到的文字,匹配不到就选第一个),保证这个必填项
+      // 有值——选不上也只是跳过,不影响标题/价格/描述/图片这些已经填好的内容。
+      steps.push('选择成色');
+      try {
+        await selectConditionBestEffort(FB_LABELS.condition, listing.condition);
+      } catch (err) {
+        steps.push(`选择成色失败(已跳过,请手动选择成色${listing.condition ? `「${listing.condition}」` : ''}): ${(err && err.message) || err}`);
       }
 
       steps.push('填写描述');

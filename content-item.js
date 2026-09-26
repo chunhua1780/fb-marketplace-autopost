@@ -88,7 +88,12 @@
       net = await waitFor(() => netCaptured[itemId], { timeout: 4000, interval: 300 });
     }
 
-    const netHasEnough = !!(net && net.condition && net.photos && net.photos.length);
+    // 只要求图片——类别/成色现在都是"尽力选一个"就行(content.js 里
+    // selectCategoryBestEffort/selectConditionBestEffort),不再是必须先读到
+    // 原文字才能重新上架。实测还发现成色这个字段经常压根就没有随着 Facebook
+    // 这个页面一起传出来(不是漏抓,是页面本身就没带),死等它没有意义;图片
+    // 不一样,没有真实原图是真的没法蒙混过去的。
+    const netHasEnough = !!(net && net.photos && net.photos.length);
 
     let listing;
     if (netHasEnough) {
@@ -155,18 +160,19 @@
       listing.netCaptured = true;
     }
 
-    // 类别/成色读不到,会导致重新上架时新表单也没法选这两个必填项,Facebook
-    // 的「下一步/发布」按钮永远是灰的——把当时页面上看起来像下拉/按钮的候选
-    // 元素记进日志,方便确认到底是哪个控件没识别出来。
+    // 类别/成色现在都是"重新上架时尽力选一个"就行,读不到不再算失败——只是
+    // 留个记录方便万一以后想深究,不影响这次导入本身算不算成功。真正会卡住
+    // 重新上架的只有图片(见上面 netHasEnough 那段注释)。
     if (!listing.category || !listing.condition) {
       appendLog({
-        level: 'error',
-        text: `「${listing.title || '商品'}」没能读到类别或成色(类别:${listing.category || '(空)'} / 成色:${listing.condition || '(空)'}${net ? ',已尝试用网络抓取的数据补,仍然缺' : ',网络抓取也没抓到数据'}),重新上架时 Facebook 会因为缺必填项发不出去。这个页面上找到的候选按钮/下拉文字:${JSON.stringify(listing.categoryConditionDiag)}`,
+        level: 'info',
+        text: `「${listing.title || '商品'}」没能读到类别或成色的原文字(类别:${listing.category || '(空)'} / 成色:${listing.condition || '(空)'}),不影响重新上架——填表时会尽力自动选一个,选得准不准不重要。`,
       });
-    } else if (net) {
+    }
+    if (net) {
       appendLog({
         level: 'info',
-        text: `「${listing.title || '商品'}」这次用网络抓取的数据补全了详情(${net.photos && net.photos.length ? `${net.photos.length}张原图` : ''}${net.condition ? '、成色' : ''}${net.description ? '、完整描述' : ''}),类别和成色都读到了。`,
+        text: `「${listing.title || '商品'}」这次用网络抓取的数据补全了详情(${net.photos && net.photos.length ? `${net.photos.length}张原图` : ''}${net.condition ? '、成色' : ''}${net.description ? '、完整描述' : ''})。`,
       });
     }
 

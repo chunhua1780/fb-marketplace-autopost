@@ -215,10 +215,15 @@ function wait(ms) {
 // 的失败提示上,不用再白跑一趟"打开发布页、填表、发现按钮点不动"才失败,面板
 // 里看到的也是真正卡住的原因,不是"找不到发布按钮"这种隔了一层的下游症状。
 async function refreshListingIfIncomplete(listing) {
-  // 类别现在不用非得先知道具体是什么——重新上架填表的时候会尽力选一个类别
-  // 出来(选得准不准不重要,只要 Facebook 不会因为类别空着而不让发布就行),
-  // 所以这里不再因为类别读不到就判定「不全」,只看成色和图片。
-  const incomplete = !listing.condition || !(listing.photos && listing.photos.length);
+  // 类别和成色现在都不用非得先知道具体是什么——重新上架填表的时候会尽力选一个
+  // 出来(选得准不准不重要,只要 Facebook 不会因为这两项空着而不让发布就行:
+  // content.js 里 selectCategoryBestEffort/selectConditionBestEffort 两个都是
+  // "有原文字就优先匹配,没有就直接选弹出来的第一个"这个思路)。实测还发现,
+  // 成色这个信息在不少商品的详情页里,压根就没有随着页面一起传出来(不是插件
+  // 哪里没写对,是 Facebook 这边这个页面本身就没带这个字段),死等一个可能永远
+  // 读不到的字段没有意义。所以这里只看图片够不够——图片是真正没法"尽力选一个"
+  // 蒙混过去的东西,必须是真实存在的原图。
+  const incomplete = !(listing.photos && listing.photos.length);
   if (!incomplete) return { listing, blockedReason: null };
 
   if (!listing.sourceItemId) {
@@ -227,7 +232,7 @@ async function refreshListingIfIncomplete(listing) {
     // 价格。没法自动补全,得用户自己把这条删掉、直接去 Facebook 页面上重新点
     // 一次这个商品(不是点"Re-post now"重试),才能重新抓到真实编号。
     const reason =
-      '缺类别/成色/图片,这条记录没有关联到 Facebook 真实商品编号,没法自动重新读取——请把这条删掉,回到 Facebook 页面重新点一次这个商品(不是点"Re-post now"重试),让它重新抓一次真实编号和完整信息。';
+      '缺图片,这条记录没有关联到 Facebook 真实商品编号,没法自动重新读取——请把这条删掉,回到 Facebook 页面重新点一次这个商品(不是点"Re-post now"重试),让它重新抓一次真实编号和完整信息。';
     return { listing, blockedReason: reason };
   }
 
@@ -239,7 +244,7 @@ async function refreshListingIfIncomplete(listing) {
     if (!res || !res.ok) {
       return {
         listing,
-        blockedReason: `重新上架前重新读取详情失败,没能补全类别/成色/图片: ${(res && res.error) || '读取失败'}`,
+        blockedReason: `重新上架前重新读取详情失败,没能补全图片: ${(res && res.error) || '读取失败'}`,
       };
     }
     const scraped = res.listing;
@@ -252,17 +257,11 @@ async function refreshListingIfIncomplete(listing) {
     };
     await setListingFields(listing.id, updates);
     const refreshed = { ...listing, ...updates };
-    const stillIncomplete = !refreshed.condition || !(refreshed.photos && refreshed.photos.length);
+    const stillIncomplete = !(refreshed.photos && refreshed.photos.length);
     if (stillIncomplete) {
-      const missing = [!refreshed.condition && '成色', !(refreshed.photos && refreshed.photos.length) && '图片']
-        .filter(Boolean)
-        .join('、');
-      const diagTrail = refreshed.categoryConditionDiag
-        ? ` 页面上找到的候选按钮文字:${JSON.stringify(refreshed.categoryConditionDiag)}`
-        : '';
       return {
         listing: refreshed,
-        blockedReason: `重新读取了 Facebook 上的原始商品页面,但还是没能读到「${missing}」,Facebook 要求这些字段填好才会解锁发布按钮,需要手动检查一下这个商品在 Facebook 上的这几项。${diagTrail}`,
+        blockedReason: '重新读取了 Facebook 上的原始商品页面,但还是没能读到图片,重新上架至少需要一张真实的原图,需要手动检查一下这个商品在 Facebook 上还在不在、图片是不是被删了。',
       };
     }
     await appendLog({ level: 'info', text: `重新上架前已刷新「${listing.title}」的详情` });
@@ -270,7 +269,7 @@ async function refreshListingIfIncomplete(listing) {
   } catch (err) {
     return {
       listing,
-      blockedReason: `重新上架前刷新详情出错,没能补全类别/成色/图片: ${(err && err.message) || err}`,
+      blockedReason: `重新上架前刷新详情出错,没能补全图片: ${(err && err.message) || err}`,
     };
   } finally {
     // 之前这里没有 await,标签页可能还没真的关掉,处理下一步(打开发布页那个
