@@ -123,6 +123,19 @@ function waitForContentReady(tabId, timeoutMs = 30000) {
   });
 }
 
+// service worker 里没有 FileReader 那一套(那是给网页/content script 用的),
+// 用 ArrayBuffer 手动转 base64,拼成跟别处存的图片同样格式的 data: URL。
+async function blobToDataUrlSW(blob) {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunkSize));
+  }
+  return `data:${blob.type || 'image/jpeg'};base64,${btoa(binary)}`;
+}
+
 function randomInt(a, b) {
   const lo = Math.min(a, b);
   const hi = Math.max(a, b);
@@ -260,11 +273,32 @@ async function refreshListingIfIncomplete(listing) {
     };
     await setListingFields(listing.id, updates);
     const refreshed = { ...listing, ...updates };
-    const stillIncomplete = !(refreshed.photos && refreshed.photos.length);
+    let stillIncomplete = !(refreshed.photos && refreshed.photos.length);
+    if (stillIncomplete && refreshed.thumbUrl) {
+      // 详情页这边死活读不到完整原图,但选中这个商品的那一刻,其实已经从
+      // "你的商品"列表页那一行自己的缩略图里保留了一张小图(thumbUrl)——
+      // 清晰度比不上原图,但好歹是这件商品真实的照片,总比完全没有图片、
+      // 整条记录卡死要强。用户明确说过"内容大致一样就行,不用追求完美",
+      // 这里就用这张退而求其次,让重新上架能继续走下去。
+      try {
+        const res2 = await fetch(refreshed.thumbUrl);
+        const blob = await res2.blob();
+        const dataUrl = await blobToDataUrlSW(blob);
+        refreshed.photos = [{ name: 'thumb.jpg', dataUrl }];
+        await setListingFields(listing.id, { photos: refreshed.photos });
+        stillIncomplete = false;
+        await appendLog({
+          level: 'info',
+          text: `「${listing.title}」详情页读不到完整原图,已经退而求其次用当初选中时保留的缩略图代替,重新上架可以继续。`,
+        });
+      } catch (thumbErr) {
+        // 缩略图也下载失败,就还是照原来的逻辑判定卡住,往下走 blockedReason
+      }
+    }
     if (stillIncomplete) {
       return {
         listing: refreshed,
-        blockedReason: '重新读取了 Facebook 上的原始商品页面,但还是没能读到图片,重新上架至少需要一张真实的原图,需要手动检查一下这个商品在 Facebook 上还在不在、图片是不是被删了。',
+        blockedReason: '重新读取了 Facebook 上的原始商品页面,但还是没能读到图片(连当初保留的缩略图也用不了),重新上架至少需要一张真实的原图,需要手动检查一下这个商品在 Facebook 上还在不在、图片是不是被删了。',
       };
     }
     await appendLog({ level: 'info', text: `重新上架前已刷新「${listing.title}」的详情` });

@@ -82,10 +82,16 @@
     // 死等一个不存在的编辑表单只会白白浪费时间、最后仍然失败。现在反过来:
     // 先看网络那边有没有抓到足够的数据,够用就直接用,不需要页面上真的展开
     // 什么表单;网络数据不够的时候,才把 DOM 表单当成补充/兜底手段去试。
+    // network-capture.js 里 scanEmbeddedJsonScripts() 是分好几批扫的
+    // (0.4/1.2/2.5/4.5/7秒各扫一次,因为 BigPipe 数据是陆续插进页面的,不是
+    // 一次性到位),但这里之前只等 4 秒——比最后两次扫描(4.5秒、7秒)还早,
+    // 等于那两次扫描扫到了也白扫,压根等不到。这是这几天反复失败的一个具体
+    // 原因,不是"抓取规则又没认出来",是等的时间本身就不够长。这里改成等
+    // 8 秒,覆盖完整个扫描时间表再多留一点余量。
     const itemId = currentItemId();
     let net = itemId && netCaptured[itemId];
     if (!net && itemId) {
-      net = await waitFor(() => netCaptured[itemId], { timeout: 4000, interval: 300 });
+      net = await waitFor(() => netCaptured[itemId], { timeout: 8000, interval: 300 });
     }
 
     // 只要求图片——类别/成色现在都是"尽力选一个"就行(content.js 里
