@@ -17,6 +17,69 @@
 (function () {
   let selectModeActive = false;
 
+  // network-capture.js 跑在页面自己的 JS 环境(MAIN world),拦到 Facebook 自己
+  // 请求 GraphQL 拿到的商品列表数据(每条都带着真实编号),通过 postMessage 转
+  // 过来。之前商品编号完全靠从这一行的 <a href="/marketplace/item/编号"> 里
+  // 提取——如果某种卡片样式/商品状态下这个链接不是这么写的,提取失败,这条记录
+  // 就永远没有真实编号,连"删掉重新选一次"都救不回来,因为重新点同一行会踩
+  // 到同一个提取失败。现在多一条后路:提取不到链接时,按标题文字去网络抓到的
+  // 商品列表里找一下有没有对得上的,大部分情况下也能找到真实编号。
+  const netListings = new Map(); // id -> {title, ...}
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) return;
+    const msg = event.data;
+    if (!msg || msg.source !== 'fbma-net-capture' || msg.type !== 'LISTING_DATA' || !msg.id) return;
+    netListings.set(msg.id, msg.data);
+  });
+
+  function normalizeTitleForMatch(text) {
+    return (text || '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}]+/gu, ' ')
+      .trim();
+  }
+
+  function titleOverlapScore(a, b) {
+    const wa = new Set(normalizeTitleForMatch(a).split(' ').filter(Boolean));
+    const wb = new Set(normalizeTitleForMatch(b).split(' ').filter(Boolean));
+    if (!wa.size || !wb.size) return 0;
+    let common = 0;
+    wa.forEach((w) => {
+      if (wb.has(w)) common += 1;
+    });
+    return common / Math.max(wa.size, wb.size);
+  }
+
+  function findIdByTitleMatch(title) {
+    if (!title) return null;
+    let best = null;
+    let bestScore = 0;
+    netListings.forEach((info, id) => {
+      const score = titleOverlapScore(title, info.title);
+      if (score > bestScore) {
+        bestScore = score;
+        best = id;
+      }
+    });
+    return bestScore >= 0.5 ? best : null;
+  }
+
+  // 点选的时候网络那边的数据不一定已经到位(页面可能还在加载),这里最多再
+  // 等 1.5 秒,不影响手感——用户点完立刻就能看到"已选中"的反馈,这个等待发生
+  // 在拿到反馈**之前**的一瞬间,不会让页面看起来卡住。
+  function waitForTitleMatch(title, timeoutMs) {
+    return new Promise((resolve) => {
+      const start = Date.now();
+      const iv = setInterval(() => {
+        const id = findIdByTitleMatch(title);
+        if (id || Date.now() - start > timeoutMs) {
+          clearInterval(iv);
+          resolve(id || null);
+        }
+      }, 200);
+    });
+  }
+
   function isActionButtonClick(target) {
     const btn = target.closest('div[role="button"], button, a[role="button"]');
     if (!btn) return false;
@@ -151,7 +214,7 @@
     if (isPlausibleRow(row)) highlightRow(row);
   }
 
-  function handleClick(e) {
+  async function handleClick(e) {
     if (!selectModeActive) return;
     if (isActionButtonClick(e.target)) return; // 让「标记为已售出」之类的正常按钮照常工作
 
@@ -166,13 +229,22 @@
 
     row.dataset.fbmaQueued = '1';
     const quickInfo = extractQuickInfo(row);
-    const itemId = extractItemId(row);
+    let itemId = extractItemId(row);
+
+    if (!itemId) {
+      // 这一行本身的 HTML 里没找到能提取编号的链接——不同卡片样式/商品状态下
+      // Facebook 渲染出来的结构不完全一样,靠 <a href> 硬提取不是每次都管用。
+      // 退一步用网络抓取到的商品列表,按标题文字找找有没有对得上的,大部分
+      // 情况下还是能找到真实编号,不用眼睁睁看着这条记录以后没法自动重新上架。
+      itemId = findIdByTitleMatch(quickInfo.title) || (await waitForTitleMatch(quickInfo.title, 1500));
+    }
 
     chrome.runtime.sendMessage({ type: 'QUEUE_DETAIL_READ', itemId, quickInfo }).catch(() => {});
     finishRowBadge(
       row,
-      itemId ? '📋 已选中,后台读取详情中...' : '✅ 已导入(基本信息,没读到 FB 编号)',
-      itemId ? '#1877f2' : '#16794d'
+      itemId ? '📋 已选中,后台读取详情中...' : '⚠️ 没读到真实商品编号,以后可能没法自动重新上架',
+      itemId ? '#1877f2' : '#c0362c',
+      itemId ? undefined : 4500
     );
   }
 

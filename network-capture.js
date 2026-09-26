@@ -80,7 +80,10 @@
 
   function imageUrlFromItem(item) {
     if (!item || typeof item !== 'object') return null;
-    const candidates = [item.uri, item.url, item.src, item.image && item.image.uri, item.original_image && item.original_image.uri];
+    // GraphQL 的列表经常是 {edges:[{node:{...}}]} 这种"连接"结构,真正的图片
+    // 字段在 node 里面又包一层,所以 node 本身也当作一个候选对象再找一遍。
+    const n = item.node && typeof item.node === 'object' ? item.node : item;
+    const candidates = [n.uri, n.url, n.src, n.image && n.image.uri, n.original_image && n.original_image.uri];
     for (const c of candidates) {
       if (typeof c === 'string' && /^https?:\/\//.test(c) && IMG_EXT_RE.test(c)) return c;
     }
@@ -208,7 +211,13 @@
       }
     }
 
-    if (score >= 3) {
+    // 门槛从 3 降到 2:在商品详情页(有 fallbackId 兜底)问题不大,反正是往同一个
+    // id 上合并字段,弱匹配顶多贡献一个字段,不会把已经读到的更好的数据冲掉;
+    // 在"你的商品"列表页(没有 fallbackId,必须对象自己带 id 字段才算数)放宽
+    // 门槛更重要——列表页一张商品卡片经常只有"标题+编号"或者"价格+编号"这种
+    // 比较单薄的结构,门槛卡在 3 会导致大量真实商品完全抓不到、白白浪费了它们
+    // 自带的真实编号。
+    if (score >= 2) {
       const id = extractListingId(obj) || fallbackId;
       if (id) mergeAndEmit(id, found);
     }
