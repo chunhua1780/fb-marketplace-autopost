@@ -34,6 +34,11 @@
       throw new Error(`[FILE_LIST_ASSIGN_FAILED] 浏览器没能把这 ${files.length} 个文件真正赋给上传控件,控件上实际只看到 ${input.files.length} 个——这一步是纯浏览器层面的操作,失败大概率是 Facebook 改了这个控件的写法`);
     }
 
+    // 必须先记完"上传之前有几张图",再触发变化事件——顺序不能反。如果
+    // Facebook 在事件处理函数里是同步地(不是等 React 下一轮渲染)直接往
+    // DOM 插入预览图,那等触发完事件才去数"上传前"的数量,这一刻其实已经
+    // 是"上传后"的数量了,两次数出来的自然一样多,会被误判成"完全没反应"。
+    const beforeCount = document.querySelectorAll('img').length;
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
 
@@ -41,7 +46,6 @@
     // 假设成功,而是真的等页面上新出现预览缩略图。页面上其他地方也可能同时
     // 有别的图片在加载(头像、图标之类),所以看的是"新增了多少张",不是
     // "总共有多少张"。
-    const beforeCount = document.querySelectorAll('img').length;
     const newCount = await waitFor(() => {
       const delta = document.querySelectorAll('img').length - beforeCount;
       return delta > 0 ? delta : null;

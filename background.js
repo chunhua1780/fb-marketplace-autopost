@@ -252,15 +252,47 @@ async function refreshListingIfIncomplete(listing) {
     return { listing, blockedReason: reason };
   }
 
+  // 详情页那边彻底读不到图片时(不管是 SCRAPE_ITEM 直接报错,还是读成功了
+  // 但 photos 是空的),退而求其次用当初选中这个商品那一刻、从"你的商品"
+  // 列表页那一行自己保留下来的缩略图(thumbUrl)顶上——清晰度比不上原图,
+  // 但好歹是这件商品真实的照片,总比整条记录卡死要强。
+  //
+  // 之前这段兜底代码只写在"SCRAPE_ITEM 成功但 photos 是空的"这一条路径
+  // 下面,而实际这几天反复出现的"读取详情彻底失败"都是 SCRAPE_ITEM 直接
+  // 返回 ok:false、在更前面就 return 掉了,兜底代码根本没有机会执行到——
+  // 等于这个兜底从写下去的那一刻就是死代码,一次都没真正生效过。这次把它
+  // 抽成一个独立函数,SCRAPE_ITEM 失败、以及读成功但没图片这两条路径都会
+  // 调用它,不会再有任何一条路径绕过兜底、直接判失败。
+  async function tryThumbnailFallback(target) {
+    if (!target.thumbUrl) return false;
+    try {
+      const res2 = await fetch(target.thumbUrl);
+      const blob = await res2.blob();
+      const dataUrl = await blobToDataUrlSW(blob);
+      target.photos = [{ name: 'thumb.jpg', dataUrl }];
+      await setListingFields(listing.id, { photos: target.photos });
+      await appendLog({
+        level: 'info',
+        text: `「${listing.title}」详情页读不到完整原图,已经退而求其次用当初选中时保留的缩略图代替,重新上架可以继续。`,
+      });
+      return true;
+    } catch (thumbErr) {
+      return false;
+    }
+  }
+
   let tab;
   try {
     tab = await chrome.tabs.create({ url: `https://www.facebook.com/marketplace/item/${listing.sourceItemId}/`, active: false });
     await waitForContentReady(tab.id, 30000);
     const res = await chrome.tabs.sendMessage(tab.id, { type: 'SCRAPE_ITEM' });
     if (!res || !res.ok) {
+      if (await tryThumbnailFallback(listing)) {
+        return { listing, blockedReason: null };
+      }
       return {
         listing,
-        blockedReason: `重新上架前重新读取详情失败,没能补全图片: ${(res && res.error) || '读取失败'}`,
+        blockedReason: `重新上架前重新读取详情失败,没能补全图片(连当初保留的缩略图也用不了): ${(res && res.error) || '读取失败'}`,
       };
     }
     const scraped = res.listing;
@@ -274,26 +306,8 @@ async function refreshListingIfIncomplete(listing) {
     await setListingFields(listing.id, updates);
     const refreshed = { ...listing, ...updates };
     let stillIncomplete = !(refreshed.photos && refreshed.photos.length);
-    if (stillIncomplete && refreshed.thumbUrl) {
-      // 详情页这边死活读不到完整原图,但选中这个商品的那一刻,其实已经从
-      // "你的商品"列表页那一行自己的缩略图里保留了一张小图(thumbUrl)——
-      // 清晰度比不上原图,但好歹是这件商品真实的照片,总比完全没有图片、
-      // 整条记录卡死要强。用户明确说过"内容大致一样就行,不用追求完美",
-      // 这里就用这张退而求其次,让重新上架能继续走下去。
-      try {
-        const res2 = await fetch(refreshed.thumbUrl);
-        const blob = await res2.blob();
-        const dataUrl = await blobToDataUrlSW(blob);
-        refreshed.photos = [{ name: 'thumb.jpg', dataUrl }];
-        await setListingFields(listing.id, { photos: refreshed.photos });
-        stillIncomplete = false;
-        await appendLog({
-          level: 'info',
-          text: `「${listing.title}」详情页读不到完整原图,已经退而求其次用当初选中时保留的缩略图代替,重新上架可以继续。`,
-        });
-      } catch (thumbErr) {
-        // 缩略图也下载失败,就还是照原来的逻辑判定卡住,往下走 blockedReason
-      }
+    if (stillIncomplete && (await tryThumbnailFallback(refreshed))) {
+      stillIncomplete = false;
     }
     if (stillIncomplete) {
       return {
@@ -304,9 +318,12 @@ async function refreshListingIfIncomplete(listing) {
     await appendLog({ level: 'info', text: `重新上架前已刷新「${listing.title}」的详情` });
     return { listing: refreshed, blockedReason: null };
   } catch (err) {
+    if (await tryThumbnailFallback(listing)) {
+      return { listing, blockedReason: null };
+    }
     return {
       listing,
-      blockedReason: `重新上架前刷新详情出错,没能补全图片: ${(err && err.message) || err}`,
+      blockedReason: `重新上架前刷新详情出错,没能补全图片(连当初保留的缩略图也用不了): ${(err && err.message) || err}`,
     };
   } finally {
     // 之前这里没有 await,标签页可能还没真的关掉,处理下一步(打开发布页那个
