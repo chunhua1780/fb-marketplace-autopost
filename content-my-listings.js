@@ -316,11 +316,11 @@
       const itemId = extractItemId(row);
       if (!itemId) continue;
       const quickInfo = extractQuickInfo(row);
-      if (quickInfo.title) rows.push({ id: itemId, title: quickInfo.title });
+      if (quickInfo.title) rows.push({ id: itemId, title: quickInfo.title, priceText: quickInfo.priceText, thumbUrl: quickInfo.thumbUrl });
     }
     // 网络那边抓到的也一起带上——能覆盖到还没滚动到、DOM 里还没渲染出来的商品。
     netListings.forEach((info, id) => {
-      if (info.title) rows.push({ id, title: info.title });
+      if (info.title) rows.push({ id, title: info.title, priceText: info.priceText, thumbUrl: info.thumbUrl });
     });
     return rows;
   }
@@ -330,6 +330,43 @@
     if (rows.length) chrome.runtime.sendMessage({ type: 'RECONCILE_LISTINGS', rows }).catch(() => {});
   }
 
+  // 用户明确反馈过:不想再一个一个手动点商品去选——干脆让插件自己把这个页面
+  // 上能看到的商品全部读一遍、全部加入队列,不需要用户在 Facebook 页面上做
+  // 任何点击。这里只是"扫一遍当前页面 + 交给 background.js 按 Facebook 编号
+  // 去重加入队列",background.js 那边本来就已经有按编号去重、避免重复添加
+  // 的逻辑(见 queueDetailRead),这里不用重复做一遍。
+  function runAutoSelectAll() {
+    if (!selectModeActive) return;
+    const rows = scanAllVisibleRows();
+    if (rows.length) chrome.runtime.sendMessage({ type: 'AUTO_SELECT_ALL', rows }).catch(() => {});
+  }
+
+  // Facebook 的"你的商品"页面通常是滚动到底才会继续加载更多商品——之前这一步
+  // 也是靠用户自己手动滚动页面去找更多商品点。现在自动帮忙往下滚几次,页面
+  // 高度不再变化(说明已经到底/没有更多了)就停,再滚回顶部,尽量覆盖到所有
+  // 已上架的商品,不需要用户自己动手滚。
+  function autoScrollToLoadAll(maxSteps = 6) {
+    return new Promise((resolve) => {
+      let steps = 0;
+      let lastHeight = 0;
+      const step = () => {
+        window.scrollTo(0, document.body.scrollHeight);
+        steps += 1;
+        setTimeout(() => {
+          const h = document.body.scrollHeight;
+          if (steps >= maxSteps || h === lastHeight) {
+            window.scrollTo(0, 0);
+            resolve();
+            return;
+          }
+          lastHeight = h;
+          step();
+        }, 900);
+      };
+      step();
+    });
+  }
+
   // 页面刚加载时列表可能还没渲染完、网络数据也可能还没到位,多扫几次覆盖
   // 更全——不用 MutationObserver 这种一直盯着 DOM 变化的办法,Facebook 页面
   // 变化太频繁,容易被触发到卡顿,固定扫几次足够了、开销也小。
@@ -337,10 +374,16 @@
   setTimeout(runReconcile, 5000);
   setTimeout(runReconcile, 10000);
 
-  function activateSelectMode() {
+  async function activateSelectMode() {
     selectModeActive = true;
+    // 手动点选依然保留着(不影响自动流程,万一自动扫描漏掉了某个特殊样式的
+    // 商品,用户还是可以自己点一下补选),但不再是必须要做的事——主流程是
+    // 下面这几行自动完成的。
     document.addEventListener('mousemove', handleMouseMove, true);
     document.addEventListener('click', handleClick, true);
+    await autoScrollToLoadAll();
+    runAutoSelectAll();
+    [1500, 4000, 8000].forEach((ms) => setTimeout(runAutoSelectAll, ms));
   }
 
   function deactivateSelectMode() {

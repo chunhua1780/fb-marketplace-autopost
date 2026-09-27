@@ -20,7 +20,6 @@ const els = {
   importStatus: document.getElementById('import-status'),
   startSelectBtn: document.getElementById('start-select-btn'),
   stopSelectBtn: document.getElementById('stop-select-btn'),
-  reloadPageBtn: document.getElementById('reload-page-btn'),
   selectProgress: document.getElementById('select-progress'),
 
   title: document.getElementById('f-title'),
@@ -314,46 +313,41 @@ async function loadSettings() {
 // 插件只负责在点击发生时把信息接住(见 content-my-listings.js)。点一下就会
 // 立刻读完完整信息存进商品队列,这里只管面板上的开关按钮和进度提示。
 
+// 之前连不上插件脚本时(最常见原因:这个 Facebook 标签页是插件重新加载/
+// 更新**之前**就已经打开着的,Chrome 不会给已经打开的旧标签页补插脚本)
+// 是弹一个「刷新网页」按钮,需要用户自己再点一下——用户明确要求过不要再
+// 多点这一下,让插件自己判断、自己刷新、自己重试。这里改成:每个标签页
+// 的连接生命周期里最多自动刷新一次(避免万一真的登录失效之类的情况陷入
+// 无限刷新循环),刷新之后 chrome.tabs.onUpdated 监听器会自动再调一次这个
+// 函数,不需要用户做任何操作。
+let autoReloadAttemptedForTab = null;
+
 async function detectCurrentTab() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab || !tab.url || !tab.url.includes('facebook.com/marketplace/you/')) {
     els.importStatus.textContent = t('importStatusNotFb');
     els.startSelectBtn.disabled = true;
-    els.reloadPageBtn.hidden = true;
     scanTabId = null;
     return;
   }
+  if (scanTabId !== tab.id) autoReloadAttemptedForTab = null;
   scanTabId = tab.id;
-  // 光看网址不够——先实际连一下插件脚本,确认它真的已经注入到这个页面里了。
-  // 最常见的连不上原因:这个 Facebook 标签页是在插件重新加载/更新**之前**
-  // 就已经打开着的——Chrome 不会给已经打开的旧标签页补插脚本,只有标签页
-  // 重新导航(刷新/跳转)一次才会重新注入。以前这种情况只能提示用户自己去
-  // 手动刷新那个网页、或者把插件面板关了重开,两边都得来回切,体验很差。
-  // 现在直接在面板里放一个「刷新网页」按钮,点一下用插件自己的权限刷新那个
-  // 标签页,不用用户自己切过去点浏览器的刷新键。
   try {
     await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
     els.importStatus.textContent = t('importStatusConnected', { url: tab.url });
     els.startSelectBtn.disabled = false;
-    els.reloadPageBtn.hidden = true;
+    autoReloadAttemptedForTab = null; // 连上了,以后万一又断开还能再自动刷新一次
   } catch (err) {
-    els.importStatus.textContent = t('importStatusNotConnected', { url: tab.url, error: (err && err.message) || err });
     els.startSelectBtn.disabled = true;
-    els.reloadPageBtn.hidden = false;
+    if (autoReloadAttemptedForTab !== tab.id) {
+      autoReloadAttemptedForTab = tab.id;
+      els.importStatus.textContent = t('autoReconnecting');
+      await chrome.tabs.reload(tab.id);
+    } else {
+      els.importStatus.textContent = t('importStatusNotConnected', { url: tab.url, error: (err && err.message) || err });
+    }
   }
 }
-
-els.reloadPageBtn.addEventListener('click', async () => {
-  if (!scanTabId) return;
-  els.reloadPageBtn.disabled = true;
-  els.importStatus.textContent = t('reloadingPage');
-  await chrome.tabs.reload(scanTabId);
-  // chrome.tabs.onUpdated 监听器(下面已经注册)会在页面刷新完成后自动
-  // 再调一次 detectCurrentTab(),这里不需要自己再手动重试。
-  setTimeout(() => {
-    els.reloadPageBtn.disabled = false;
-  }, 3000);
-});
 
 async function refreshSelectModeUi() {
   const { selectModeActive } = await chrome.storage.local.get('selectModeActive');

@@ -9,7 +9,6 @@ const I18N = {
     langLabel: 'Language',
 
     importH2: '① Select my existing listings',
-    importHint: 'Click Start, then click your listings on Facebook — each one gets selected and read automatically.',
     startSelectBtn: 'Start selecting',
     stopSelectBtn: 'Stop selecting',
 
@@ -122,14 +121,10 @@ const I18N = {
       'Please switch to that page in the browser first, then come back and click the extension icon.',
     importStatusConnected: '✅ Connected to current page: {url}',
     importStatusNotConnected:
-      "⚠️ The extension script hasn't connected to this page yet. The most common cause is this Facebook tab " +
-      'was already open before installing/updating the extension — click "Reload the Facebook page" below ' +
-      'and it will reconnect automatically.\nURL: {url}\nOriginal error: {error}',
-    reloadPageBtn: 'Reload the Facebook page',
-    reloadingPage: 'Reloading the page, please wait a moment...',
-    selectModeOn:
-      'Selection mode is on — go back to the Facebook page, hover over your listings, and click to select. ' +
-      'You can click through many in a row.',
+      '⚠️ Already tried reloading this page automatically, but the extension still could not connect. Please ' +
+      'check you are logged into Facebook, then try reopening this panel.\nURL: {url}\nOriginal error: {error}',
+    autoReconnecting: '⏳ Reconnecting to the page automatically, please wait...',
+    selectModeOn: '🔄 Automatically scanning and reading your listings in the background — no need to click anything on Facebook.',
     startSelectFailed: 'Failed to start: {error}',
   },
 
@@ -137,9 +132,8 @@ const I18N = {
     appTitle: 'FB Marketplace 智能卖家助手',
     langLabel: '语言',
 
-    importH2: '① 点选我已有的商品',
-    importHint: '点「开始点选」,然后去 Facebook 页面点你的商品——会自动选中并读取信息。',
-    startSelectBtn: '开始点选商品',
+    importH2: '① 选择我已有的商品',
+    startSelectBtn: '开始自动选择',
     stopSelectBtn: '停止点选',
 
     listH2: '② 商品队列(自动重新上架)',
@@ -242,11 +236,10 @@ const I18N = {
     importStatusNotFb: '⚠️ 当前标签页不是你的「我的商品/正在出售」页面(facebook.com/marketplace/you/selling)。请先在浏览器里切换到那个页面,再回来点插件图标。',
     importStatusConnected: '✅ 已连接到当前页面:{url}',
     importStatusNotConnected:
-      '⚠️ 插件脚本还没连上这个页面。最常见的原因是这个 Facebook 标签页是插件安装/更新之前就开着的——点下面' +
-      '「刷新网页」这个按钮就会自动重新连上。\n网址:{url}\n原始错误:{error}',
-    reloadPageBtn: '刷新网页',
-    reloadingPage: '正在刷新网页,请稍等...',
-    selectModeOn: '点选模式已开启——回到 Facebook 页面,把鼠标移到你的商品上,点一下就会自动选中并读取,可以连续点多个。',
+      '⚠️ 已经自动刷新过这个页面一次,但插件还是没能连上。请确认这边浏览器已经登录了 Facebook,' +
+      '然后试试关掉面板重新打开。\n网址:{url}\n原始错误:{error}',
+    autoReconnecting: '⏳ 正在自动重新连接页面,请稍等...',
+    selectModeOn: '🔄 正在后台自动扫描并读取你的商品——不需要在 Facebook 页面上点任何东西。',
     startSelectFailed: '开启失败:{error}',
   },
 };

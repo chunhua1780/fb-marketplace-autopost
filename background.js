@@ -105,6 +105,9 @@ async function handleMessage(message, sender) {
     case 'RECONCILE_LISTINGS':
       return reconcileListings(message.rows || []);
 
+    case 'AUTO_SELECT_ALL':
+      return autoSelectAll(message.rows || []);
+
     default:
       return { ok: false, error: '未知消息类型: ' + message.type };
   }
@@ -441,6 +444,28 @@ async function deleteOldListing(itemId, titleForLog) {
   } finally {
     if (tab) chrome.tabs.remove(tab.id).catch(() => {});
   }
+}
+
+// 用户明确反馈过不想再一个个手动点商品来选——现在"开始点选"这个按钮会让
+// content-my-listings.js 自动把当前页面(滚动到底后)能看到的所有商品都扫
+// 一遍,直接把整批商品交过来,这里只需要按 Facebook 真实编号去重(已经在
+// 队列/列表里的不用重复添加),新的就跟手动点一次完全一样地走 queueDetailRead
+// 这条已有的、每个商品之间有随机间隔的后台详情读取流程,不需要另外单独写
+// 一套批量逻辑。
+async function autoSelectAll(rows) {
+  const listings = await getListings();
+  const known = new Set(listings.map((l) => l.sourceItemId).filter(Boolean));
+  let added = 0;
+  for (const row of rows) {
+    if (!row || !row.id || known.has(row.id)) continue;
+    known.add(row.id);
+    await queueDetailRead(row.id, { title: row.title || '', priceText: row.priceText || '', thumbUrl: row.thumbUrl || '' });
+    added += 1;
+  }
+  if (added) {
+    await appendLog({ level: 'info', text: `自动扫描到 ${added} 个新商品,已加入后台详情读取队列` });
+  }
+  return { ok: true, added };
 }
 
 // ---------- 点选式导入:后台读完整详情 ----------
