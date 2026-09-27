@@ -91,6 +91,19 @@
     return !!ok;
   }
 
+  // 读"页面上这个字段控件现在实际显示的文字",不是"我们打算填成什么"——
+  // 类别/成色这些字段选中后,Facebook 会把选中的值直接显示在原来那个触发
+  // 控件上(field-utils.js 里 findFieldByNearbyLabel 的注释也提到过这一点),
+  // 所以可以用同一套查找逻辑,选择流程走完之后再读一次,就知道 Facebook
+  // 这边到底有没有真的收下这次选择,不用再靠"我们自己以为选上了"。
+  function readFieldDisplayText(candidates) {
+    const el = findFieldByLabel(candidates) || findFieldByNearbyLabel(candidates) || findClickableByText(candidates);
+    if (!el) return '(控件都没找到)';
+    const raw = 'value' in el ? el.value : el.textContent;
+    const text = fbNormalize(raw || '');
+    return text || '(显示为空)';
+  }
+
   // 类别选得准不准不重要,重要的是必须选上——Facebook 要求这个字段非空才会
   // 解锁发布按钮。类别选择器大概率点开后弹出的是一整棵分类树(选大类→再选
   // 子类,可能还有第三层),不是一层列表,所以这里不要求精确匹配:能对上原来
@@ -228,7 +241,18 @@
             () => document.querySelector('[role="listbox"] [role="option"], ul[role="listbox"] li'),
             { timeout: 3000 }
           );
-          if (suggestion) suggestion.click();
+          if (suggestion) {
+            suggestion.click();
+            // Location 这个控件大概率是个 React combobox,不是普通 input——点了
+            // 建议项之后不能假设就一定生效了,等一下确认输入框里真的变成选中的
+            // 地点文字了(而不是还停在我们自己敲进去的原始文字,或者变回空的)。
+            const committed = await waitFor(() => (locEl.value && locEl.value.trim() ? true : null), { timeout: 1000, interval: 100 });
+            if (!committed) {
+              steps.push(`地点建议项点击后未确认生效(输入框当前显示:「${locEl.value || '(空)'}」)`);
+            }
+          } else {
+            steps.push('地点没有弹出建议项可选,可能没有真正生效');
+          }
         }
       }
 
@@ -255,8 +279,18 @@
           await fbSleep(1200);
         }
         if (nextWasDisabled) {
+          // 之前这里报的是"从旧商品读到的原始文字",不是"Facebook 表单现在实际
+          // 显示的值"——这两个可能对不上:比如类别其实点开过、但没点中真正的选项,
+          // 表单上还是空的,只是我们自己读到过一个文字。现在改成直接从页面上读
+          // 这几个控件当前显示的内容,才能真正回答"到底是哪个字段没提交成功",
+          // 不用再靠猜。
+          const currentState = {
+            类别: readFieldDisplayText(FB_LABELS.category),
+            成色: readFieldDisplayText(FB_LABELS.condition),
+            地点: readFieldDisplayText(FB_LABELS.location),
+          };
           throw new Error(
-            `[NEXT_DISABLED] 「下一步」按钮是灰色不能点的状态,Facebook 认为当前这一页表单还有必填项没填好。当前读到的字段值——类别:${listing.category || '(空)'} / 成色:${listing.condition || '(空)'} / 地点:${listing.location || '(空)'}。诊断信息:${JSON.stringify(collectDiagnostics())}`
+            `[NEXT_DISABLED] 「下一步」按钮是灰色不能点的状态,Facebook 认为当前这一页表单还有必填项没填好。表单上现在实际显示的值——类别:${currentState.类别} / 成色:${currentState.成色} / 地点:${currentState.地点}(供对比,原本从旧商品读到的值——类别:${listing.category || '(空)'} / 成色:${listing.condition || '(空)'} / 地点:${listing.location || '(空)'})。诊断信息:${JSON.stringify(collectDiagnostics())}`
           );
         }
         if (!publishBtn) {
