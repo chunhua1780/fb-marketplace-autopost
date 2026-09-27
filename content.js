@@ -62,6 +62,35 @@
     await fbSleep(1000);
   }
 
+  // 之前这里是直接在整个 document 里搜 [role="option"]/[role="menuitem"]/li,
+  // 弹出的下拉框其实通常是插到 document.body 末尾的一个浮层容器里,但页面上
+  // 同时可能还残留着别的、本该已经关闭的下拉框/菜单节点(没被真正移除,只是
+  // 隐藏),不分范围地整页搜有可能挑到不属于"当前刚点开这个"下拉框的选项。
+  // 现在先找"当前可见的浮层容器"(listbox/menu/dialog 里最后一个出现且可见
+  // 的那个),只在这个容器里面找选项;实在找不到这样的容器才退回整页搜索,
+  // 保证不会因为收窄范围反而找不到东西。
+  function findOpenPopupScope() {
+    const containers = Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], [role="dialog"]')).filter(
+      (el) => el.offsetParent !== null
+    );
+    return containers.length ? containers[containers.length - 1] : document;
+  }
+
+  // 点完一个选项之后,不能光"点了就当选上了"——万一这次点击压根没生效(比如
+  // 点到了浮层外层的空白、或者 Facebook 那次渲染还没绑定好点击事件),后面
+  // 的表单字段其实还是空的,只是我们自己以为选好了。这里等一小段时间,确认
+  // 要么这个选项本身被标成了"已选中"(aria-selected),要么它所在的浮层已经
+  // 关掉/换掉(说明点击确实触发了下一步),两者都没发生就说明这次点击大概率
+  // 没生效。
+  async function confirmOptionPicked(pick) {
+    const ok = await waitFor(() => {
+      if (!document.body.contains(pick)) return true;
+      if (pick.getAttribute('aria-selected') === 'true') return true;
+      return null;
+    }, { timeout: 1200, interval: 100 });
+    return !!ok;
+  }
+
   // 类别选得准不准不重要,重要的是必须选上——Facebook 要求这个字段非空才会
   // 解锁发布按钮。类别选择器大概率点开后弹出的是一整棵分类树(选大类→再选
   // 子类,可能还有第三层),不是一层列表,所以这里不要求精确匹配:能对上原来
@@ -79,7 +108,8 @@
     let remainingPreferred = preferredText;
     for (let level = 0; level < 4; level++) {
       const options = await waitFor(() => {
-        const list = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], li')).filter(
+        const scope = findOpenPopupScope();
+        const list = Array.from(scope.querySelectorAll('[role="option"], [role="menuitem"], li')).filter(
           (el) => el.offsetParent !== null
         );
         return list.length ? list : null;
@@ -94,6 +124,7 @@
       remainingPreferred = null; // 只在第一层尝试匹配原来的类别文字,子分类直接选第一个
 
       pick.click();
+      await confirmOptionPicked(pick);
       await fbSleep(600);
     }
   }
@@ -114,7 +145,8 @@
     await fbSleep(400);
 
     const options = await waitFor(() => {
-      const list = Array.from(document.querySelectorAll('[role="option"], li')).filter((el) => el.offsetParent !== null);
+      const scope = findOpenPopupScope();
+      const list = Array.from(scope.querySelectorAll('[role="option"], li')).filter((el) => el.offsetParent !== null);
       return list.length ? list : null;
     }, { timeout: 3000 });
     if (!options) throw new Error('成色下拉列表没有弹出任何选项');
@@ -123,6 +155,7 @@
     if (preferredText) pick = options.find((o) => fbNormalize(o.textContent).includes(fbNormalize(preferredText)));
     if (!pick) pick = options[0];
     pick.click();
+    await confirmOptionPicked(pick);
     await fbSleep(300);
   }
 
@@ -202,13 +235,29 @@
       if (listing.settingsAutoPublish) {
         steps.push('自动翻页并发布');
         let publishBtn = null;
+        let nextWasDisabled = false;
         for (let i = 0; i < 8; i++) {
           publishBtn = findClickableByText(FB_LABELS.publish);
           if (publishBtn) break;
           const nextBtn = findClickableByText(FB_LABELS.next);
           if (!nextBtn) break;
+          // 「下一步」也可能是灰色不能点的——之前这里跟"下一步"一样,不管
+          // 能不能点直接点、等 1.2 秒、再点,点满 8 次还是翻不过去才报错,
+          // 报错的时候早就看不出来到底是"翻页按钮找不到"还是"翻页按钮一直
+          // 是灰的"。现在跟发布按钮一样提前检查一下,是灰的就立刻停下来报
+          // 具体原因,不用再空转 8 次才发现。
+          const nextDisabled = nextBtn.getAttribute('aria-disabled') === 'true' || nextBtn.disabled === true;
+          if (nextDisabled) {
+            nextWasDisabled = true;
+            break;
+          }
           nextBtn.click();
           await fbSleep(1200);
+        }
+        if (nextWasDisabled) {
+          throw new Error(
+            `[NEXT_DISABLED] 「下一步」按钮是灰色不能点的状态,Facebook 认为当前这一页表单还有必填项没填好。当前读到的字段值——类别:${listing.category || '(空)'} / 成色:${listing.condition || '(空)'} / 地点:${listing.location || '(空)'}。诊断信息:${JSON.stringify(collectDiagnostics())}`
+          );
         }
         if (!publishBtn) {
           // 之前这里的报错不带诊断信息,排查一次就要问用户要一次截图——现在跟
