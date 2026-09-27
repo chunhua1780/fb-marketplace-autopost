@@ -41,6 +41,7 @@ const els = {
   saveBtn: document.getElementById('save-btn'),
   cancelEditBtn: document.getElementById('cancel-edit-btn'),
   list: document.getElementById('listing-list'),
+  listSummary: document.getElementById('list-summary'),
   repostAllBtn: document.getElementById('repost-all-btn'),
 
   sMin: document.getElementById('s-min'),
@@ -232,8 +233,24 @@ async function renderList() {
   els.list.innerHTML = '';
   if (!listings.length) {
     els.list.innerHTML = `<li class="empty">${escapeHtml(t('listEmpty'))}</li>`;
+    if (els.listSummary) els.listSummary.textContent = '';
     return;
   }
+
+  // 之前面板上每条商品下面永远堆着好几行技术性说明(关联了哪个 Facebook 编号、
+  // 多少天自动重发一次、会不会自动删旧版本),用户明确反馈过不需要看这些,只
+  // 想要一眼看出"选了多少个、成功几个、失败几个"。这里在列表上方加一条汇总,
+  // 每条商品本身只保留缩略图/标题/价格/状态这几个最核心的信息。
+  if (els.listSummary) {
+    const counts = { total: listings.length, posted: 0, failed: 0, running: 0 };
+    listings.forEach((l) => {
+      if (l.status === 'posted') counts.posted += 1;
+      else if (l.status === 'failed') counts.failed += 1;
+      else if (l.status === 'running' || l.status === 'pending') counts.running += 1;
+    });
+    els.listSummary.textContent = t('listSummary', counts);
+  }
+
   listings.forEach((l, i) => {
     const li = document.createElement('li');
     li.className = 'listing-item status-' + l.status;
@@ -251,13 +268,10 @@ async function renderList() {
         </div>
       </div>
       ${
-        l.sourceItemId
-          ? `<div class="badge">${escapeHtml(t('badgeLinkedFb', { id: l.sourceItemId.slice(-6) }))}</div>`
+        l.lastError
+          ? `<details class="error-details"><summary>${escapeHtml(t('viewDetailsToggle'))}</summary><div class="error">${escapeHtml(l.lastError)}</div></details>`
           : ''
       }
-      ${l.repostEnabled ? `<div class="badge">${escapeHtml(t('badgeRepost', { days: l.repostIntervalDays || 7 }))}</div>` : ''}
-      ${l.deleteOldOnRepost ? `<div class="badge">${escapeHtml(t('badgeDeleteOld'))}</div>` : ''}
-      ${l.lastError ? `<div class="error">${escapeHtml(l.lastError)}</div>` : ''}
       <div class="actions">
         <button data-action="repost">${escapeHtml(t('actionRepost'))}</button>
         <button data-action="edit">${escapeHtml(t('actionEdit'))}</button>

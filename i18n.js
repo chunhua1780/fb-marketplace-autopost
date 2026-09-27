@@ -17,6 +17,8 @@ const I18N = {
     listHint: 'Selected items automatically re-post on a randomized schedule (old deleted, new posted).',
     listEmpty: 'No items yet — click "Start selecting" above and click your listings on Facebook.',
     repostAllBtn: 'Re-post all now',
+    listSummary: 'Selected: {total}   ✅ Success: {posted}   ❌ Failed: {failed}   ⏳ In progress: {running}',
+    viewDetailsToggle: 'View details',
     advancedSummary: 'More settings (folder mirror, posting rules, auto-reply, FAQ, manual add)',
 
     filestoreH2: 'Local folder mirror',
@@ -104,10 +106,6 @@ const I18N = {
     statusReadingDetails: '⏳ Reading full details in the background...',
     statusFailed: 'Failed',
 
-    badgeLinkedFb: '📥 Linked to a real Facebook listing (ID ...{id})',
-    badgeRepost: '🔁 Auto re-post every {days} days',
-    badgeDeleteOld: '⚠️ Re-posting will auto-delete the old version',
-
     actionRepost: 'Re-post now',
     actionEdit: 'Edit',
     actionRetry: 'Reset to pending',
@@ -148,6 +146,8 @@ const I18N = {
     listHint: '选中的商品会按随机时间自动重新上架(删旧发新)。',
     listEmpty: '还没有商品——点上面「开始点选商品」,然后去 Facebook 页面点你的商品',
     repostAllBtn: '一键全部重新上架',
+    listSummary: '已选择:{total}   ✅ 成功:{posted}   ❌ 失败:{failed}   ⏳ 处理中:{running}',
+    viewDetailsToggle: '查看详情',
     advancedSummary: '更多设置(本地文件夹、发布规则、自动回复、常见问题、手动新增)',
 
     filestoreH2: '本地文件夹镜像',
@@ -227,10 +227,6 @@ const I18N = {
     statusImported: '已从 Facebook 导入',
     statusReadingDetails: '⏳ 正在后台读取完整信息...',
     statusFailed: '失败',
-
-    badgeLinkedFb: '📥 已关联 Facebook 真实商品(编号 ...{id})',
-    badgeRepost: '🔁 每 {days} 天自动重新上架',
-    badgeDeleteOld: '⚠️ 重新上架会自动删旧版本',
 
     actionRepost: '立即重新上架',
     actionEdit: '编辑',

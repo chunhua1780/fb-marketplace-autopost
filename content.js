@@ -181,6 +181,33 @@
     return { newItemId: m[1], newItemUrl: `https://www.facebook.com/marketplace/item/${m[1]}/` };
   }
 
+  // 发布之后网址没有直接带上新商品编号时(比如跳到了"你的商品"列表页)的
+  // 补救办法:在当前页面上找 /marketplace/item/编号 这种链接,按标题重叠度
+  // 挑一个最像的当作"很可能就是刚发布出来的这条"。挑不出足够像的就返回
+  // null——宁可没有编号,也不要瞎猜一个错的(错的编号可能会导致后面误删
+  // 别的商品)。
+  function findLikelyNewItemId(title) {
+    if (!title) return null;
+    const wanted = fbNormalize(title).split(/\s+/).filter(Boolean);
+    if (!wanted.length) return null;
+    const links = Array.from(document.querySelectorAll('a[href*="/marketplace/item/"]'));
+    let best = null;
+    let bestScore = 0;
+    for (const a of links) {
+      const m = a.href.match(/\/marketplace\/item\/(\d+)/);
+      if (!m) continue;
+      const text = fbNormalize(a.textContent || a.getAttribute('aria-label') || '');
+      if (!text) continue;
+      const words = new Set(text.split(/\s+/).filter(Boolean));
+      const overlap = wanted.filter((w) => words.has(w)).length / wanted.length;
+      if (overlap > bestScore) {
+        bestScore = overlap;
+        best = m[1];
+      }
+    }
+    return bestScore >= 0.5 ? best : null;
+  }
+
   async function fillListing(listing) {
     const steps = [];
     try {
@@ -323,17 +350,39 @@
         // 几秒就直接当成功,这样万一没真的发出去,至少不会把旧商品删掉却什么
         // 新的都没有。
         steps.push('确认发布是否真的成功');
-        const newItemInfo = await waitFor(() => {
+        // 之前这里只认「网址变成 /marketplace/item/新编号」这一种情况算成功,
+        // 实测发现 Facebook 点了发布之后经常跳的其实是"你的商品"列表页
+        // (/marketplace/you/selling),不是新商品自己的详情页——这种情况下之前
+        // 的代码会误判成"没有真的发布成功",商品明明发出去了却被记成失败,还
+        // 会一直重试。现在只要网址已经离开了发布表单本身(不管具体跳到哪),
+        // 就先认为发布这个动作大概率是成功的,再尝试从当前页面按标题找出新
+        // 商品的编号——找不到编号不会当成失败,只是没法确认具体是哪个新编号
+        // (这不影响下面"删旧商品"的安全逻辑:background.js 那边只有真的拿到
+        // 了确认的新编号才会去删旧的,没编号就只是不删,不会误删)。
+        const outcome = await waitFor(() => {
           const info = captureNewItemId();
-          return info.newItemId ? info : null;
+          if (info.newItemId) return { kind: 'item-url', ...info };
+          if (!location.href.includes('/marketplace/create/item')) return { kind: 'navigated-away' };
+          return null;
         }, { timeout: 8000 });
 
-        if (!newItemInfo) {
+        if (!outcome) {
           throw new Error(
-            `已经点击了「发布」按钮,但等了几秒网址还是没有跳转到新商品自己的页面,不确定是不是真的发布成功了,请手动检查。诊断信息:${JSON.stringify(collectDiagnostics())}`
+            `已经点击了「发布」按钮,但等了几秒网址还留在发布表单页面,不确定是不是真的发布成功了,请手动检查。诊断信息:${JSON.stringify(collectDiagnostics())}`
           );
         }
-        return { ok: true, published: true, steps, ...newItemInfo };
+        if (outcome.kind === 'item-url') {
+          return { ok: true, published: true, steps, newItemId: outcome.newItemId, newItemUrl: outcome.newItemUrl };
+        }
+        steps.push('网址跳去了「你的商品」这类页面,不是新商品自己的详情页,已尝试按标题在页面上找出新商品编号');
+        const likelyId = findLikelyNewItemId(listing.title);
+        return {
+          ok: true,
+          published: true,
+          steps,
+          newItemId: likelyId,
+          newItemUrl: likelyId ? `https://www.facebook.com/marketplace/item/${likelyId}/` : null,
+        };
       }
 
       return { ok: true, published: false, steps };

@@ -391,11 +391,17 @@ async function processListing(listing) {
 
     // 只有「新的确认发布成功」+ 单条商品开了 deleteOldOnRepost + 全局总开关也开着,
     // 才会去删除 Facebook 上的旧版本;顺序上永远是先确认新的发出去了才删旧的。
+    // 这里必须要求 result.newItemId 真的存在(不能只看它跟 oldItemId 不一样)——
+    // content.js 那边发布成功后如果网址没有直接带出新商品编号(比如跳到了"你的
+    // 商品"列表页,又没能按标题猜出是哪一条),newItemId 会是 null,这时候
+    // null !== oldItemId 恒成立,单靠"不相等"这个条件会把这种"发了但不确定
+    // 编号"的情况也当成能安全删除,有可能删错。
     if (
       published &&
       listing.deleteOldOnRepost &&
       settings.autoDeleteOldListings &&
       oldItemId &&
+      result.newItemId &&
       oldItemId !== result.newItemId
     ) {
       await deleteOldListing(oldItemId, listing.title);
