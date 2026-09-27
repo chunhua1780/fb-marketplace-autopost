@@ -158,12 +158,40 @@ button.danger {
   border: 1px solid #ccd0d5;
 }
 
-#listing-list {
+#listing-list,
+#candidates-list {
   list-style: none;
   margin: 0;
   padding: 0;
   max-height: 220px;
   overflow-y: auto;
+}
+
+.candidate-item {
+  border-bottom: 1px solid #eee;
+  padding: 4px 0;
+  font-size: 12px;
+}
+
+.candidate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.candidate-row input[type='checkbox'] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.candidate-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .listing-item {

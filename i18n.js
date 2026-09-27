@@ -8,16 +8,15 @@ const I18N = {
     appTitle: 'FB Marketplace Smart Seller Assistant',
     langLabel: 'Language',
 
-    importH2: '① Select my existing listings',
     startSelectBtn: 'Start selecting',
     stopSelectBtn: 'Stop selecting',
 
-    listH2: '② Listing queue (auto re-post)',
-    listHint: 'Selected items automatically re-post on a randomized schedule (old deleted, new posted).',
-    listEmpty: 'No items yet — click "Start selecting" above and click your listings on Facebook.',
+    listEmpty: 'No items yet — click "Start selecting" above, then check the ones you want below and publish.',
     repostAllBtn: 'Re-post all now',
     listSummary: 'Selected: {total}   ✅ Success: {posted}   ❌ Failed: {failed}   ⏳ In progress: {running}',
     viewDetailsToggle: 'View details',
+    publishSelectedBtn: 'Publish selected ({count})',
+    alertPublishSelectedFail: 'Could not publish the selected items: {error}',
     advancedSummary: 'More settings (folder mirror, posting rules, auto-reply, FAQ, manual add)',
 
     filestoreH2: 'Local folder mirror',
@@ -132,16 +131,15 @@ const I18N = {
     appTitle: 'FB Marketplace 智能卖家助手',
     langLabel: '语言',
 
-    importH2: '① 选择我已有的商品',
     startSelectBtn: '开始自动选择',
     stopSelectBtn: '停止点选',
 
-    listH2: '② 商品队列(自动重新上架)',
-    listHint: '选中的商品会按随机时间自动重新上架(删旧发新)。',
-    listEmpty: '还没有商品——点上面「开始点选商品」,然后去 Facebook 页面点你的商品',
+    listEmpty: '还没有商品——点上面「开始自动选择」,然后在下面勾选想要的商品并发布',
     repostAllBtn: '一键全部重新上架',
     listSummary: '已选择:{total}   ✅ 成功:{posted}   ❌ 失败:{failed}   ⏳ 处理中:{running}',
     viewDetailsToggle: '查看详情',
+    publishSelectedBtn: '发布选中 ({count})',
+    alertPublishSelectedFail: '发布选中的商品失败:{error}',
     advancedSummary: '更多设置(本地文件夹、发布规则、自动回复、常见问题、手动新增)',
 
     filestoreH2: '本地文件夹镜像',

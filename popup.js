@@ -42,6 +42,8 @@ const els = {
   list: document.getElementById('listing-list'),
   listSummary: document.getElementById('list-summary'),
   repostAllBtn: document.getElementById('repost-all-btn'),
+  candidatesList: document.getElementById('candidates-list'),
+  publishSelectedBtn: document.getElementById('publish-selected-btn'),
 
   sMin: document.getElementById('s-min'),
   sMax: document.getElementById('s-max'),
@@ -288,6 +290,69 @@ async function renderList() {
   });
 }
 
+// ---------- 待选候选商品(扫描到,但用户还没勾选/发布) ----------
+// 用户明确要求过:扫描到的商品不能自动加入队列,必须先在这里以"未勾选"的
+// 候选形式出现,由用户自己勾选想要的、点了「发布」才真正处理——这个 Set
+// 只存在这个面板打开期间的内存里,不写进 chrome.storage(没必要跨面板开关
+// 保留,面板重开一次候选商品还在,重新勾一遍也不麻烦,反而更保险,不会
+// 因为存储没清干净而"莫名其妙又选中了")。
+const selectedCandidateIds = new Set();
+
+function updatePublishSelectedBtn() {
+  const count = selectedCandidateIds.size;
+  els.publishSelectedBtn.hidden = false;
+  els.publishSelectedBtn.disabled = count === 0;
+  els.publishSelectedBtn.textContent = t('publishSelectedBtn', { count });
+}
+
+async function renderCandidates() {
+  const { scanCandidates = [] } = await chrome.storage.local.get('scanCandidates');
+  els.candidatesList.innerHTML = '';
+
+  const validIds = new Set(scanCandidates.map((c) => c.id));
+  Array.from(selectedCandidateIds).forEach((id) => {
+    if (!validIds.has(id)) selectedCandidateIds.delete(id);
+  });
+
+  if (!scanCandidates.length) {
+    els.publishSelectedBtn.hidden = true;
+    return;
+  }
+
+  scanCandidates.forEach((c) => {
+    const li = document.createElement('li');
+    li.className = 'candidate-item';
+    li.innerHTML = `
+      <label class="candidate-row">
+        <input type="checkbox" ${selectedCandidateIds.has(c.id) ? 'checked' : ''} />
+        ${c.thumbUrl ? `<img class="thumb" src="${escapeHtml(c.thumbUrl)}" alt="" />` : '<div class="thumb thumb-empty"></div>'}
+        <span class="candidate-text">${escapeHtml(c.title || '')} <span class="price">${escapeHtml(c.priceText || '')}</span></span>
+      </label>
+    `;
+    li.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
+      if (e.target.checked) selectedCandidateIds.add(c.id);
+      else selectedCandidateIds.delete(c.id);
+      updatePublishSelectedBtn();
+    });
+    const thumbImg = li.querySelector('img.thumb');
+    if (thumbImg) thumbImg.addEventListener('error', () => thumbImg.remove(), { once: true });
+    els.candidatesList.appendChild(li);
+  });
+  updatePublishSelectedBtn();
+}
+
+els.publishSelectedBtn.addEventListener('click', async () => {
+  const ids = Array.from(selectedCandidateIds);
+  if (!ids.length) return;
+  els.publishSelectedBtn.disabled = true;
+  const res = await chrome.runtime
+    .sendMessage({ type: 'PUBLISH_SELECTED_CANDIDATES', ids })
+    .catch((err) => ({ ok: false, error: err.message }));
+  selectedCandidateIds.clear();
+  if (!res || !res.ok) alert(t('alertPublishSelectedFail', { error: res && res.error }));
+  await renderCandidates();
+});
+
 async function loadSettings() {
   const settings = await getSettings();
 
@@ -522,6 +587,7 @@ async function renderLog() {
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
   if (changes.listings) renderList();
+  if (changes.scanCandidates) renderCandidates();
   if (changes.runLog) renderLog();
   if (changes.faqs) renderFaqs();
   if (changes.selectModeActive) refreshSelectModeUi();
@@ -550,6 +616,7 @@ async function renderAllDynamic() {
   await safeRun('current tab', detectCurrentTab);
   await safeRun('select mode', refreshSelectModeUi);
   await safeRun('folder mirror', refreshFilestoreStatus);
+  await safeRun('candidates', renderCandidates);
   await safeRun('listings', renderList);
   await safeRun('settings', loadSettings);
   await safeRun('log', renderLog);

@@ -330,15 +330,16 @@
     if (rows.length) chrome.runtime.sendMessage({ type: 'RECONCILE_LISTINGS', rows }).catch(() => {});
   }
 
-  // 用户明确反馈过:不想再一个一个手动点商品去选——干脆让插件自己把这个页面
-  // 上能看到的商品全部读一遍、全部加入队列,不需要用户在 Facebook 页面上做
-  // 任何点击。这里只是"扫一遍当前页面 + 交给 background.js 按 Facebook 编号
-  // 去重加入队列",background.js 那边本来就已经有按编号去重、避免重复添加
-  // 的逻辑(见 queueDetailRead),这里不用重复做一遍。
-  function runAutoSelectAll() {
+  // 用户明确反馈过:不想再一个一个手动点商品去选,但也明确要求过"读取"不能
+  // 等于"选中/加入队列"——扫描到的商品只能先作为「待选」候选出现在面板里,
+  // 初始状态必须是全部未选择,用户自己在面板里勾选想要的、点了发布才真正
+  // 处理。所以这里只是把扫到的商品交给 background.js 存成候选列表
+  // (scanCandidates),不会触碰真正的商品队列,不会自动读取详情、更不会自动
+  // 发布或删除任何东西。
+  function runAutoScan() {
     if (!selectModeActive) return;
     const rows = scanAllVisibleRows();
-    if (rows.length) chrome.runtime.sendMessage({ type: 'AUTO_SELECT_ALL', rows }).catch(() => {});
+    if (rows.length) chrome.runtime.sendMessage({ type: 'SCAN_CANDIDATES', rows }).catch(() => {});
   }
 
   // Facebook 的"你的商品"页面通常是滚动到底才会继续加载更多商品——之前这一步
@@ -382,8 +383,8 @@
     document.addEventListener('mousemove', handleMouseMove, true);
     document.addEventListener('click', handleClick, true);
     await autoScrollToLoadAll();
-    runAutoSelectAll();
-    [1500, 4000, 8000].forEach((ms) => setTimeout(runAutoSelectAll, ms));
+    runAutoScan();
+    [1500, 4000, 8000].forEach((ms) => setTimeout(runAutoScan, ms));
   }
 
   function deactivateSelectMode() {

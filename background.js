@@ -105,8 +105,11 @@ async function handleMessage(message, sender) {
     case 'RECONCILE_LISTINGS':
       return reconcileListings(message.rows || []);
 
-    case 'AUTO_SELECT_ALL':
-      return autoSelectAll(message.rows || []);
+    case 'SCAN_CANDIDATES':
+      return scanCandidates(message.rows || []);
+
+    case 'PUBLISH_SELECTED_CANDIDATES':
+      return publishSelectedCandidates(message.ids || []);
 
     default:
       return { ok: false, error: '未知消息类型: ' + message.type };
@@ -446,26 +449,61 @@ async function deleteOldListing(itemId, titleForLog) {
   }
 }
 
-// 用户明确反馈过不想再一个个手动点商品来选——现在"开始点选"这个按钮会让
-// content-my-listings.js 自动把当前页面(滚动到底后)能看到的所有商品都扫
-// 一遍,直接把整批商品交过来,这里只需要按 Facebook 真实编号去重(已经在
-// 队列/列表里的不用重复添加),新的就跟手动点一次完全一样地走 queueDetailRead
-// 这条已有的、每个商品之间有随机间隔的后台详情读取流程,不需要另外单独写
-// 一套批量逻辑。
-async function autoSelectAll(rows) {
+// 上一版"自动扫描到什么就直接全部加入队列"是个危险的设计错误:每条商品
+// 一旦真正进入队列、读完详情,会自动带上 repostEnabled+deleteOldOnRepost
+// (见下面 autoRepostFieldsFor 的注释,这是导入完成后一直就有的行为)——等于
+// 用户在 Facebook「你的商品」页面停留一下,插件就会自己把账号下所有商品都
+// 排进"到期自动删旧发新"的循环,完全没有给用户一个确认的机会。这里改成
+// 两步:扫描只负责把"看到了哪些商品"存成一份候选列表(scanCandidates),
+// 不碰真正的商品队列(listings)、不触发任何读取/发布/删除;用户在面板里
+// 自己勾选想要的之后,再调用下面的 publishSelectedCandidates 才会真正把
+// 选中的这些交给 queueDetailRead 进入现有队列。候选列表按 Facebook 编号
+// 去重(重复扫到同一个商品只保留一条),已经在正式队列里的商品也不会再作为
+// "待选"候选出现。
+async function scanCandidates(rows) {
   const listings = await getListings();
   const known = new Set(listings.map((l) => l.sourceItemId).filter(Boolean));
-  let added = 0;
+  const { scanCandidates: existing = [] } = await chrome.storage.local.get('scanCandidates');
+  const merged = new Map(existing.map((c) => [c.id, c]));
   for (const row of rows) {
-    if (!row || !row.id || known.has(row.id)) continue;
-    known.add(row.id);
-    await queueDetailRead(row.id, { title: row.title || '', priceText: row.priceText || '', thumbUrl: row.thumbUrl || '' });
-    added += 1;
+    if (!row || !row.id) continue;
+    if (known.has(row.id)) {
+      merged.delete(row.id); // 已经在正式队列/已发布了,不用再出现在待选列表里
+      continue;
+    }
+    const prev = merged.get(row.id);
+    merged.set(row.id, {
+      id: row.id,
+      title: row.title || (prev && prev.title) || '',
+      priceText: row.priceText || (prev && prev.priceText) || '',
+      thumbUrl: row.thumbUrl || (prev && prev.thumbUrl) || '',
+    });
   }
-  if (added) {
-    await appendLog({ level: 'info', text: `自动扫描到 ${added} 个新商品,已加入后台详情读取队列` });
+  const list = Array.from(merged.values());
+  await chrome.storage.local.set({ scanCandidates: list });
+  return { ok: true, total: list.length };
+}
+
+// 用户在面板里勾选完候选商品、点了「发布」之后才会走到这里——只有这一步才
+// 真正把选中的商品交给已有的 queueDetailRead(跟手动点一次 Facebook 商品完全
+// 一样的流程,复用现成的随机间隔详情读取队列),不会因为扫描/去重/自动修复
+// 这些只读操作而意外把商品排进发布/删除的流程。
+async function publishSelectedCandidates(ids) {
+  if (!ids || !ids.length) return { ok: true, queued: 0 };
+  const { scanCandidates: candidates = [] } = await chrome.storage.local.get('scanCandidates');
+  const byId = new Map(candidates.map((c) => [c.id, c]));
+  const idSet = new Set(ids);
+  let queued = 0;
+  for (const id of ids) {
+    const c = byId.get(id);
+    if (!c) continue;
+    await queueDetailRead(id, { title: c.title || '', priceText: c.priceText || '', thumbUrl: c.thumbUrl || '' });
+    queued += 1;
   }
-  return { ok: true, added };
+  const remaining = candidates.filter((c) => !idSet.has(c.id));
+  await chrome.storage.local.set({ scanCandidates: remaining });
+  if (queued) await appendLog({ level: 'info', text: `已把选中的 ${queued} 个商品加入后台详情读取队列` });
+  return { ok: true, queued };
 }
 
 // ---------- 点选式导入:后台读完整详情 ----------
