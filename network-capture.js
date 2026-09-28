@@ -132,6 +132,17 @@
     return urls;
   }
 
+  // Facebook 的 GraphQL 经常把"一段文字"包成 {text: "..."} 这种结构(常见于
+  // 富文本字段,比如描述、标题这类可能带格式的文本),不是裸字符串——之前的
+  // 打分规则只认 typeof v === 'string',会完全跳过这种包了一层的字段。这里
+  // 统一拆一层,不管是裸字符串还是 {text: "..."} 包一层的,都能取到真正的
+  // 文字内容。
+  function unwrapText(v) {
+    if (typeof v === 'string') return v;
+    if (v && typeof v === 'object' && typeof v.text === 'string') return v.text;
+    return null;
+  }
+
   function extractListingId(obj) {
     for (const key of ['marketplace_listing_id', 'listing_id', 'id']) {
       const v = obj[key];
@@ -183,13 +194,19 @@
       if (v == null) continue;
       const lk = key.toLowerCase();
 
-      if (!found.title && typeof v === 'string' && lk.indexOf('title') >= 0 && v.length >= 2 && v.length <= 200 && v.indexOf('\n') < 0) {
-        found.title = v;
-        score += 2;
+      if (!found.title && lk.indexOf('title') >= 0) {
+        const titleText = unwrapText(v);
+        if (titleText && titleText.length >= 2 && titleText.length <= 200 && titleText.indexOf('\n') < 0) {
+          found.title = titleText;
+          score += 2;
+        }
       }
-      if (!found.description && typeof v === 'string' && lk.indexOf('description') >= 0 && v.length > 0) {
-        found.description = v;
-        score += 2;
+      if (!found.description && lk.indexOf('description') >= 0) {
+        const descText = unwrapText(v);
+        if (descText && descText.length > 0) {
+          found.description = descText;
+          score += 2;
+        }
       }
       if (!found.price && looksLikePriceObj(v)) {
         const priceText = extractPriceText(v);

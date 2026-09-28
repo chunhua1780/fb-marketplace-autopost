@@ -113,6 +113,14 @@
         photos: [],
         categoryConditionDiag: null,
       };
+      // 图片这条路径走通了(netHasEnough),但标题/描述读到的原始网络数据里
+      // 没有——之前只有在"彻底没读到任何数据"时才会存调试样本,这种"图片有、
+      // 标题/描述没有"的情况完全没留下任何证据,下次再出现同样问题只能凭空
+      // 猜打分规则哪里不对。这里补上:只要标题或描述是空的,就把这次拦到的
+      // 原始样本存一份,面板里"🐛 调试信息"会自动显示出来。
+      if (!net.title || !net.description) {
+        saveDebugSamples(itemId);
+      }
     } else {
       const ready = await ensureEditFormVisible();
       if (!ready) {

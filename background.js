@@ -389,6 +389,17 @@ async function processListing(listing) {
       level: 'success',
       text: `「${listing.title}」${published ? '已自动发布' : '已自动填好表单,请在浏览器里确认后手动点击发布'}`,
     });
+    // 用户反馈过:发布本身能成功,但发出来的标题/描述是空的——这种情况之前
+    // 不会报错(空字符串也是"成功填了"),所以只在成功日志里悄悄过去了,
+    // 完全看不出来。这里补一条提醒:如果这次要发布的内容本身标题/描述就是
+    // 空的,直接说清楚,不用等用户自己去 Facebook 上发现发出来的东西是空的。
+    if (published && (!listing.title || !listing.description)) {
+      const emptyFields = [!listing.title && '标题', !listing.description && '描述'].filter(Boolean).join('、');
+      await appendLog({
+        level: 'info',
+        text: `⚠️「${listing.title || listing.id}」发布时这几项本身就是空的:${emptyFields}——不是发布这一步的问题,是导入/重新读取详情那一步就没读到这些内容,需要往那边查。`,
+      });
+    }
 
     if (published) {
       await wait(1500); // 给 Facebook 一点时间把发布这个请求处理完,再关标签页

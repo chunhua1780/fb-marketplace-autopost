@@ -224,13 +224,22 @@
         await attachPhotos(listing.photos);
       }
 
+      // 用户反馈过:上传/发布本身能走通,但发布出来的标题/价格/描述是空的。
+      // 之前这里填完就直接往下走,从来没确认过"填的时候这个字段本身有没有
+      // 内容"——填空值也是"成功地填了一个空字符串",不会报错,没法区分到底
+      // 是「读取那一步就没读到内容」还是「读到了内容但填的时候出了什么问题」。
+      // 现在每一步填完都记一条日志,带上"当时打算填的值是不是空的",下次再
+      // 出现发布出来内容是空的情况,从这几行日志就能直接看出问题出在读取
+      // 还是填写这一侧,不用再靠猜。
       steps.push('填写标题');
       const titleEl = findFieldByLabel(FB_LABELS.title);
       if (titleEl) setNativeValue(titleEl, listing.title || '');
+      steps.push(`标题字段:${titleEl ? '找到控件' : '没找到控件'},准备填入的值${listing.title ? `「${listing.title}」` : '是空的'}`);
 
       steps.push('填写价格');
       const priceEl = findFieldByLabel(FB_LABELS.price);
       if (priceEl) setNativeValue(priceEl, String(listing.price ?? ''));
+      steps.push(`价格字段:${priceEl ? '找到控件' : '没找到控件'},准备填入的值${listing.price ? `「${listing.price}」` : '是空的'}`);
 
       // 类别用户明确说了选得准不准不重要,重要的是必须选上一个,不然 Facebook
       // 不会解锁发布按钮——所以这里不管有没有从旧商品读到具体类别文字,都会
@@ -257,6 +266,7 @@
       steps.push('填写描述');
       const descEl = findFieldByLabel(FB_LABELS.description);
       if (descEl) setNativeValue(descEl, listing.description || '');
+      steps.push(`描述字段:${descEl ? '找到控件' : '没找到控件'},准备填入的值${listing.description ? `(${listing.description.length} 个字符)` : '是空的'}`);
 
       if (listing.location) {
         steps.push('填写地点');
