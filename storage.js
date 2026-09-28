@@ -101,8 +101,20 @@ async function getListings() {
   return listings;
 }
 
+// 商品的图片是按 dataURL(base64 文本)整个存进 chrome.storage.local 的,体积
+// 比原图大不少,商品一多很容易顶到 chrome.storage.local 默认 10MB 的配额上限
+// (manifest.json 里已经加了 unlimitedStorage 权限来解决这个问题,但这里还是
+// 包一层 try/catch)——之前这里写失败(比如配额超限报的 QUOTA_BYTES 错误)会
+// 直接整个抛出去、没有任何记录,调用方有的地方接住了会接着重复触发同样的写
+// 失败,现象上就是图片/详情"莫名其妙没保存上"、又说不清到底是哪里的问题。
+// 现在失败至少会留一条日志,不会悄无声息地丢数据。
 async function saveListings(listings) {
-  await chrome.storage.local.set({ listings });
+  try {
+    await chrome.storage.local.set({ listings });
+  } catch (err) {
+    console.error('[fbma] saveListings 失败:', err);
+    throw err;
+  }
 }
 
 async function getSettings() {

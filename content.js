@@ -11,7 +11,7 @@
   //
   // 现在把这一步拆成几个能分别确认的阶段,每一步都要验证"确实发生了"才往下
   // 走,哪一步卡住,报错信息就直接说是哪一步,不用再靠猜。
-  async function attachPhotos(photos) {
+  async function attachPhotos(photos, steps) {
     if (!photos || !photos.length) return;
 
     const input = await waitFor(() => document.querySelector('input[type="file"]'));
@@ -42,23 +42,26 @@
     input.dispatchEvent(new Event('input', { bubbles: true }));
     input.dispatchEvent(new Event('change', { bubbles: true }));
 
-    // 这才是真正能确认"Facebook 收到并且在处理"的信号——不是傻等几秒钟就
-    // 假设成功,而是真的等页面上新出现预览缩略图。页面上其他地方也可能同时
-    // 有别的图片在加载(头像、图标之类),所以看的是"新增了多少张",不是
-    // "总共有多少张"。
+    // 这里本来是想确认"Facebook 收到并且在处理"——等页面上新出现预览缩略图
+    // (数 <img> 标签数量变化)。但这只是一个启发式信号,不是可靠的事实:
+    // Facebook 的上传预览组件是 React 动态渲染的,完全有可能不是通过新增
+    // <img> 标签来展示预览(比如用 background-image、canvas,或者这次渲染
+    // 恰好比 8 秒还慢)——"没检测到新增 img"不等于"文件真的没上传成功"。
+    // 真正确定的事实只有上面两步:文件对象都成功生成了、也成功赋给了上传
+    // 控件的 FileList——这两步任何一步失败才是真正可以确定的失败。这里检测
+    // 不到新增预览图,不再当成硬性失败去中断整个发布流程(以前这么做,可能
+    // 把"其实已经上传成功、只是插件没观察到预览"的情况也一起误判成失败),
+    // 只是记一条非致命的提示,继续往下走。
     const newCount = await waitFor(() => {
       const delta = document.querySelectorAll('img').length - beforeCount;
       return delta > 0 ? delta : null;
     }, { timeout: 8000, interval: 300 });
 
-    if (!newCount) {
-      throw new Error(
-        `[UPLOAD_PREVIEW_NOT_DETECTED] 已经把 ${files.length} 张图片交给了上传控件、也触发了变化事件,但等了 8 秒页面上完全没有新出现的图片预览——文件本身交过去了,但 Facebook 那边好像没收到或者没处理这次上传,不是插件这边卡住不动`
+    if (!newCount && steps) {
+      steps.push(
+        `已经把 ${files.length} 张图片交给了上传控件、也触发了变化事件,但等了 8 秒页面上没有观察到新增的图片预览(不代表一定失败,继续往下走,以实际发布结果为准)`
       );
     }
-    // 新增数量没有精确匹配到预期张数不算失败——缩略图渲染方式不一定是一张
-    // 图对应一个 <img>,数不准很正常,重要的是确认了"确实有新内容出现",不是
-    // 完全没反应。
     await fbSleep(1000);
   }
 
@@ -221,7 +224,7 @@
 
       if (listing.photos && listing.photos.length) {
         steps.push('上传照片');
-        await attachPhotos(listing.photos);
+        await attachPhotos(listing.photos, steps);
       }
 
       // 用户反馈过:上传/发布本身能走通,但发布出来的标题/价格/描述是空的。
